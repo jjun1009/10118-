@@ -1,3 +1,3 @@
-streamlit>=1.28.0
-pandas>=2.0.0
-plotly>=5.18.0
+pip install plotly
+import plotly.express as px   # 이렇게만 있으면 충분
+streamlit run app.py
