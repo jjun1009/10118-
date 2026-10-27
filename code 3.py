@@ -86,12 +86,29 @@ if menu == "서론":
     """)
 
 elif menu == "막대그래프":
+    col_left, col_right = st.columns([1, 1])
+
+    with col_left:
+        show_counts = st.checkbox(
+            "구간별 표본수 표시",
+            value=True,
+            help="각 구간 하단의 전체 행수와 환각 행수 표시 여부를 전환합니다.",
+        )
+
+    with col_right:
+        n_bins = st.selectbox(
+            "구간 개수",
+            options=[5, 6, 7],
+            index=0,
+            help="토큰 범위를 몇 개의 구간으로 나눌지 선택합니다.",
+        )
+
     st.markdown(f"### {version} — 구간별 환각 발생률")
 
     bins = pd.cut(
         df[token_col],
-        bins=5,
-        labels=[f"구간 {i+1}" for i in range(5)],
+        bins=n_bins,
+        labels=[f"구간 {i+1}" for i in range(n_bins)],
         include_lowest=True,
     )
     df["토큰 구간"] = bins
@@ -128,16 +145,17 @@ elif menu == "막대그래프":
 
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("📋 구간별 상세 통계")
-    st.dataframe(
-        summary.rename(
-            columns={
-                "토큰 구간": "구간",
-                "전체_행수": "전체 행수",
-                "환각_행수": "환각 행수 (환각 발생 여부=1)",
-                "환각_발생률(%)": "환각 발생률 (%)",
-            }
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
+    if show_counts:
+        st.subheader("📋 구간별 상세 통계")
+        st.dataframe(
+            summary.rename(
+                columns={
+                    "토큰 구간": "구간",
+                    "전체_행수": "전체 행수",
+                    "환각_행수": "환각 행수 (환각 발생 여부=1)",
+                    "환각_발생률(%)": "환각 발생률 (%)",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
