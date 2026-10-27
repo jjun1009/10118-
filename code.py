@@ -1,2 +1,3 @@
-pip install plotly
-streamlit run app.py
+streamlit
+pandas
+plotly
