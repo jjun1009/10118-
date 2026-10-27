@@ -1,2 +1,2 @@
-pip install --upgrade plotly
+pip install plotly
 streamlit run app.py
