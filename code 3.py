@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 # 페이지 설정
 st.set_page_config(page_title="LLM Hallucination Analyzer", layout="wide")
 
-# 컬럼 매핑 ( 삭제할 컬럼 제외 )
+# 유지할 컬럼
 keep_columns = [
     "LLM_Model_Name",
     "Temperature_Setting",
@@ -60,7 +60,7 @@ if version == "입력 토큰 수 기준":
 else:
     token_col = "답변 토큰 수"
 
-# ---------- 좌측 메뉴 (세션 상태) ----------
+# ---------- 좌측 메뉴 ----------
 if "menu" not in st.session_state:
     st.session_state.menu = "서론"
 
@@ -73,7 +73,7 @@ menu = st.sidebar.radio(
 )
 st.session_state.menu = menu
 
-# 모든 화면에 공통 제목
+# 모든 화면 공통 제목
 st.title("LLM의 할루미네이션")
 
 # ==================== 서론 화면 ====================
@@ -99,7 +99,7 @@ if menu == "서론":
 elif menu == "막대그래프":
     st.markdown(f"### {version} — 구간별 환각 발생률")
 
-    # 5개 범위 나누기 (분위수 기준 또는 균등 구간 — 여기서는 균등 5 구간)
+    # 5개 구간으로 나누기
     min_val = df[token_col].min()
     max_val = df[token_col].max()
     bins = pd.cut(
@@ -110,12 +110,12 @@ elif menu == "막대그래프":
     )
     df["토큰 구간"] = bins
 
-    # 구간별 집계
+    # 구간별 집계 — ★★★ 컬럼명을 변경된 한국어 이름으로 사용 ★★★
     summary = (
         df.groupby("토큰 구간", observed=True)
         .agg(
-            전체_행수=("Is_Hallucination", "count"),
-            환각_행수=("Is_Hallucination", lambda x: (x == 1).sum()),
+            전체_행수=("환각 발생 여부", "count"),
+            환각_행수=("환각 발생 여부", lambda x: (x == 1).sum()),
         )
         .reset_index()
     )
@@ -158,7 +158,7 @@ elif menu == "막대그래프":
             columns={
                 "토큰 구간": "구간",
                 "전체_행수": "전체 행수",
-                "환각_행수": "환각 행수 (Is_Hallucination=1)",
+                "환각_행수": "환각 행수 (환각 발생 여부=1)",
                 "환각_발생률(%)": "환각 발생률 (%)",
             }
         ),
