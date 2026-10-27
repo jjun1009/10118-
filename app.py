@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+import plotly.express as px   # 이렇게만 있으면 충분
 import numpy as np
 import os
 
