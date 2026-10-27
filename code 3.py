@@ -221,7 +221,7 @@ elif menu == "산점도":
                 ),
                 hovertemplate=(
                     "복잡도 지수: %{x:.3f}<br>"
-                    f"{y_col}: %{y:.3f}<br>"
+                    f"{y_col}: %{{y:.3f}}<br>"
                     "환각 발생 여부: 0<extra></extra>"
                 ),
             )
@@ -243,7 +243,7 @@ elif menu == "산점도":
                 ),
                 hovertemplate=(
                     "복잡도 지수: %{x:.3f}<br>"
-                    f"{y_col}: %{y:.3f}<br>"
+                    f"{y_col}: %{{y:.3f}}<br>"
                     "환각 발생 여부: 1<extra></extra>"
                 ),
             )
