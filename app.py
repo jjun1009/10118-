@@ -1,6 +1,7 @@
+# 앱 첫 부분 임포트가 정확히 아래여야 합니다.
 import streamlit as st
 import pandas as pd
-import plotly.express as px   # 이렇게만 있으면 충분
+import plotly.express as px   # ⬅️ 이것만 사용. graph_objects는 없음
 import numpy as np
 import os
 
