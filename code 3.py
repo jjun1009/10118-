@@ -1,13 +1,9 @@
-# app.py
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 
-# 페이지 설정
 st.set_page_config(page_title="LLM Hallucination Analyzer", layout="wide")
 
-# 유지할 컬럼
 keep_columns = [
     "LLM_Model_Name",
     "Temperature_Setting",
@@ -36,31 +32,28 @@ rename_map = {
     "Is_Hallucination": "환각 발생 여부",
 }
 
-# 데이터 로드
+
 @st.cache_data
 def load_data():
     df = pd.read_csv("rag_hallucination.csv")
     df = df[keep_columns].rename(columns=rename_map)
     return df
 
+
 df = load_data()
 
-# ---------- 사이드바: 버전 전환 ----------
 st.sidebar.title("📊 지표 선택")
 version = st.sidebar.radio(
     "막대그래프 버전",
     ["입력 토큰 수 기준", "답변 토큰 수 기준"],
     index=0,
-    help="입력 토큰수 또는 답변 토큰수 구간별 환각 발생률을 표시합니다.",
 )
 
-# 토큰 컬럼 선택
 if version == "입력 토큰 수 기준":
     token_col = "입력 토큰 수"
 else:
     token_col = "답변 토큰 수"
 
-# ---------- 좌측 메뉴 ----------
 if "menu" not in st.session_state:
     st.session_state.menu = "서론"
 
@@ -68,15 +61,12 @@ menu = st.sidebar.radio(
     "메뉴",
     ["서론", "막대그래프"],
     index=0 if st.session_state.menu == "서론" else 1,
-    horizontal=False,
     label_visibility="collapsed",
 )
 st.session_state.menu = menu
 
-# 모든 화면 공통 제목
 st.title("LLM의 할루미네이션")
 
-# ==================== 서론 화면 ====================
 if menu == "서론":
     st.markdown("""
     ## 📝 개요
@@ -95,13 +85,9 @@ if menu == "서론":
       답변 관련성 점수, 문맥 충실도 점수, 환각 유형, 환각 발생 여부
     """)
 
-# ==================== 막대그래프 화면 ====================
 elif menu == "막대그래프":
     st.markdown(f"### {version} — 구간별 환각 발생률")
 
-    # 5개 구간으로 나누기
-    min_val = df[token_col].min()
-    max_val = df[token_col].max()
     bins = pd.cut(
         df[token_col],
         bins=5,
@@ -110,7 +96,6 @@ elif menu == "막대그래프":
     )
     df["토큰 구간"] = bins
 
-    # 구간별 집계 — ★★★ 컬럼명을 변경된 한국어 이름으로 사용 ★★★
     summary = (
         df.groupby("토큰 구간", observed=True)
         .agg(
@@ -123,7 +108,6 @@ elif menu == "막대그래프":
         summary["환각_행수"] / summary["전체_행수"] * 100
     ).round(2)
 
-    # 막대그래프 (Plotly)
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
@@ -132,13 +116,6 @@ elif menu == "막대그래프":
             text=summary["환각_발생률(%)"].apply(lambda x: f"{x}%"),
             textposition="outside",
             marker_color="steelblue",
-            hovertemplate=(
-                "<b>%{x}</b><br>"
-                "전체 행수: %{customdata[0]}<br>"
-                "환각 행수: %{customdata[1]}<br>"
-                "발생률: %{y}%<extra></extra>"
-            ),
-            customdata=summary[["전체_행수", "환각_행수"]].values,
         )
     )
     fig.update_layout(
@@ -151,7 +128,6 @@ elif menu == "막대그래프":
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # 구간별 상세표
     st.subheader("📋 구간별 상세 통계")
     st.dataframe(
         summary.rename(
