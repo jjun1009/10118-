@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import numpy as np
 
 st.set_page_config(page_title="LLM Hallucination Analyzer", layout="wide")
 
@@ -82,6 +83,7 @@ if menu == "서론":
     2. 사이드바에서 **입력 토큰 수 기준** / **답변 토큰 수 기준**을 전환합니다.
     3. 막대그래프 화면에서 구간별 환각 발생률을 확인합니다.
     4. 산점도 화면에서 복잡도 지수와 각 점수 간 관계를 색상으로 확인합니다.
+    5. 산점도 오른쪽 상단에서 추세선과 상관계수를 켜고 끌 수 있습니다.
 
     ### 데이터
     - 원본 파일: `rag_hallucination.csv`
@@ -176,7 +178,7 @@ elif menu == "산점도":
         "문맥 충실도 점수",
     ]
 
-    col_left, col_right = st.columns([1, 1])
+    col_left, col_right = st.columns([1, 2])
 
     with col_left:
         y_col = st.selectbox(
@@ -200,10 +202,37 @@ elif menu == "산점도":
             help="환각 발생 여부가 1인 그룹을 산점도에 표시합니다.",
             key="show_group1_checkbox",
         )
+        show_trend_0 = st.checkbox(
+            "0군 추세선 표시",
+            value=False,
+            help="환각 0군 데이터에 선형 추세선을 표시합니다.",
+            key="trend0_checkbox",
+        )
+        show_trend_1 = st.checkbox(
+            "1군 추세선 표시",
+            value=False,
+            help="환각 1군 데이터에 선형 추세선을 표시합니다.",
+            key="trend1_checkbox",
+        )
+        show_corr_0 = st.checkbox(
+            "0군 상관계수 표시",
+            value=False,
+            help="환각 0군의 피어슨 상관계수(r)를 그래프에 표시합니다.",
+            key="corr0_checkbox",
+        )
+        show_corr_1 = st.checkbox(
+            "1군 상관계수 표시",
+            value=False,
+            help="환각 1군의 피어슨 상관계수(r)를 그래프에 표시합니다.",
+            key="corr1_checkbox",
+        )
 
     plot_df = df[["복잡도 지수", y_col, "환각 발생 여부"]].dropna()
 
     fig = go.Figure()
+
+    r0 = None
+    r1 = None
 
     if show_group_0:
         df_0 = plot_df[plot_df["환각 발생 여부"] == 0]
@@ -226,6 +255,32 @@ elif menu == "산점도":
                 ),
             )
         )
+        if show_corr_0 and len(df_0) >= 2:
+            r0 = np.corrcoef(
+                df_0["복잡도 지수"], df_0[y_col]
+            )[0, 1]
+
+        if show_trend_0 and len(df_0) >= 2:
+            slope, intercept = np.polyfit(
+                df_0["복잡도 지수"], df_0[y_col], 1
+            )
+            x_sorted = np.sort(df_0["복잡도 지수"].values)
+            y_trend = slope * x_sorted + intercept
+            fig.add_trace(
+                go.Scatter(
+                    x=x_sorted,
+                    y=y_trend,
+                    mode="lines",
+                    name="0군 추세선",
+                    line=dict(
+                        color="blue",
+                        width=2,
+                        dash="dash",
+                    ),
+                    hoverinfo="skip",
+                    showlegend=True,
+                )
+            )
 
     if show_group_1:
         df_1 = plot_df[plot_df["환각 발생 여부"] == 1]
@@ -247,6 +302,62 @@ elif menu == "산점도":
                     "환각 발생 여부: 1<extra></extra>"
                 ),
             )
+        )
+        if show_corr_1 and len(df_1) >= 2:
+            r1 = np.corrcoef(
+                df_1["복잡도 지수"], df_1[y_col]
+            )[0, 1]
+
+        if show_trend_1 and len(df_1) >= 2:
+            slope, intercept = np.polyfit(
+                df_1["복잡도 지수"], df_1[y_col], 1
+            )
+            x_sorted = np.sort(df_1["복잡도 지수"].values)
+            y_trend = slope * x_sorted + intercept
+            fig.add_trace(
+                go.Scatter(
+                    x=x_sorted,
+                    y=y_trend,
+                    mode="lines",
+                    name="1군 추세선",
+                    line=dict(
+                        color="red",
+                        width=2,
+                        dash="dash",
+                    ),
+                    hoverinfo="skip",
+                    showlegend=True,
+                )
+            )
+
+    if r0 is not None and show_corr_0:
+        fig.add_annotation(
+            text=f"0군 r = {r0:.3f}",
+            xref="paper",
+            yref="paper",
+            x=0.98,
+            y=0.98,
+            xanchor="right",
+            yanchor="top",
+            bgcolor="white",
+            bordercolor="blue",
+            borderwidth=1,
+            font=dict(color="blue"),
+        )
+
+    if r1 is not None and show_corr_1:
+        fig.add_annotation(
+            text=f"1군 r = {r1:.3f}",
+            xref="paper",
+            yref="paper",
+            x=0.98,
+            y=0.90,
+            xanchor="right",
+            yanchor="top",
+            bgcolor="white",
+            bordercolor="red",
+            borderwidth=1,
+            font=dict(color="red"),
         )
 
     fig.update_layout(
