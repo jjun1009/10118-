@@ -60,9 +60,11 @@ if "menu" not in st.session_state:
 
 menu = st.sidebar.radio(
     "메뉴",
-    ["서론", "막대그래프", "산점도"],
+    ["서론", "막대그래프", "산점도", "히스토그램"],
     index=0 if st.session_state.menu == "서론" else (
-        1 if st.session_state.menu == "막대그래프" else 2
+        1 if st.session_state.menu == "막대그래프" else (
+            2 if st.session_state.menu == "산점도" else 3
+        )
     ),
     label_visibility="collapsed",
     key="menu_radio",
@@ -78,11 +80,13 @@ if menu == "서론":
     LLM의 할루미네이션(환각) 발생 양상을 탐색하기 위한 시각화 도구입니다.
 
     ### 사용 방법
-    1. 왼쪽 메뉴에서 **서론**, **막대그래프**, **산점도** 중 선택합니다.
+    1. 왼쪽 메뉴에서 **서론**, **막대그래프**, **산점도**, **히스토그램** 중 선택합니다.
     2. 사이드바에서 **입력 토큰 수 기준** / **답변 토큰 수 기준**을 전환합니다.
     3. 막대그래프 화면: 구간 개수(5/6/7)와 표본수 표시 여부를 조정하고 구간별 환각 발생률을 확인합니다.
     4. 산점도 화면: y축 점수를 선택하고, 온도 구간을 전환하며 구간별 산점도를 확인합니다.
        필요하면 1000개 무작위 샘플링 토글로 데이터 양을 제한할 수 있습니다.
+    5. 히스토그램 화면: 문장복잡도 구간 개수(5/6/7)를 선택하고,  
+       세 가지 점수 중 하나를 골라 특정 구간의 히스토그램 분포를 확인합니다.
 
     ### 데이터
     - 원본 파일: `rag_hallucination.csv`
@@ -301,3 +305,102 @@ elif menu == "산점도":
             use_container_width=True,
             hide_index=True,
         )
+
+elif menu == "히스토그램":
+    st.markdown("### 문장복잡도 지수 구간별 히스토그램")
+
+    col_left, col_right = st.columns([1, 1])
+
+    with col_left:
+        complexity_bins = st.selectbox(
+            "문장복잡도 구간 개수",
+            options=[5, 6, 7],
+            index=1,
+            help="문장복잡도 지수를 몇 개의 구간으로 나눌지 선택합니다.",
+            key="complexity_bins_selectbox",
+        )
+
+        hist_y_options = [
+            "개체 일치 점수",
+            "답변 관련성 점수",
+            "문맥 충실도 점수",
+        ]
+        hist_y_col = st.selectbox(
+            "표시할 속성",
+            options=hist_y_options,
+            index=0,
+            help="히스토그램으로 표시할 점수를 선택합니다.",
+            key="hist_y_selectbox",
+        )
+
+    with col_right:
+        complexity_bins_cut = pd.cut(
+            df["복잡도 지수"],
+            bins=complexity_bins,
+            labels=[f"복잡도 구간 {i+1}" for i in range(complexity_bins)],
+            include_lowest=True,
+        )
+        df["복잡도 구간"] = complexity_bins_cut
+
+        complexity_labels = complexity_bins_cut.cat.categories.tolist()
+
+        selected_complexity = st.selectbox(
+            "볼 복잡도 구간",
+            options=complexity_labels,
+            index=0,
+            help="히스토그램을 표시할 문장복잡도 구간을 선택합니다.",
+            key="complexity_interval_selectbox",
+        )
+
+    st.markdown(f"### {selected_complexity} — {hist_y_col} 분포")
+
+    interval_df = df[df["복잡도 구간"] == selected_complexity].dropna(
+        subset=[hist_y_col]
+    )
+
+    st.caption(f"행수: {len(interval_df)}행")
+
+    if len(interval_df) == 0:
+        st.warning("선택한 구간에 데이터가 없습니다.")
+    else:
+        fig_hist = go.Figure()
+
+        fig_hist.add_trace(
+            go.Histogram(
+                x=interval_df[hist_y_col],
+                nbinsx=30,
+                marker_color="steelblue",
+                opacity=0.7,
+                hovertemplate=(
+                    f"{hist_y_col}: %{{x:.3f}}<br>"
+                    "도수: %{y}<extra></extra>"
+                ),
+            )
+        )
+
+        fig_hist.update_layout(
+            xaxis_title=hist_y_col,
+            yaxis_title="도수 (빈도)",
+            template="plotly_white",
+            height=450,
+            bargap=0.1,
+        )
+
+        st.plotly_chart(fig_hist, use_container_width=True)
+
+        st.subheader("📊 기본 통계")
+        stats_data = {
+            "통계량": ["행수", "평균", "표준편차", "최소값", "25%", "중앙값", "75%", "최대값"],
+            "값": [
+                len(interval_df),
+                round(interval_df[hist_y_col].mean(), 4),
+                round(interval_df[hist_y_col].std(), 4),
+                round(interval_df[hist_y_col].min(), 4),
+                round(interval_df[hist_y_col].quantile(0.25), 4),
+                round(interval_df[hist_y_col].median(), 4),
+                round(interval_df[hist_y_col].quantile(0.75), 4),
+                round(interval_df[hist_y_col].max(), 4),
+            ]
+        }
+        stats_df = pd.DataFrame(stats_data)
+        st.dataframe(stats_df, use_container_width=True, hide_index=True)
