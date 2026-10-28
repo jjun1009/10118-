@@ -64,8 +64,8 @@ menu = st.sidebar.radio(
     index=0 if st.session_state.menu == "서론" else (
         1 if st.session_state.menu == "막대그래프" else (
             2 if st.session_state.menu == "산점도"else(
-                3 if st.session_state.menu == "히스토그램"
-            ) else 4
+                3 if st.session_state.menu == "히스토그램" else 4
+            )
         )
     ),
     label_visibility="collapsed",
