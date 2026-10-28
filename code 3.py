@@ -534,6 +534,22 @@ elif menu == "상자그림":
         "Contradiction",
         "Unrelated",
     ]
+        # ── 복잡도 구간 컬럼 생성 (상자그림 자체) ──
+    # 이미 존재하면 그대로 사용, 없으면 그룹 기준으로 생성
+    if "복잡도 구간" not in df.columns:
+        default_bins = 6
+        df["복잡도 구간"] = pd.cut(
+            df["복잡도 지수"],
+            bins=default_bins,
+            labels=[f"복잡도 구간 {i+1}" for i in range(default_bins)],
+            include_lowest=True,
+        )
+
+    # ── 세션스테이트 초기화 (처음 실행 시) ──
+    if "box_hallucination_type" not in st.session_state:
+        st.session_state["box_hallucination_type"] = "전체"
+    if "box_show_stats" not in st.session_state:
+        st.session_state["box_show_stats"] = True
 
     # ── 표시 대상 데이터 ──
     if box_hallucination_type == "전체":
