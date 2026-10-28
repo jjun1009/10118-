@@ -1,6 +1,6 @@
-import os                          # ← 추가 (CSV 존재 여부 확인용)
-import numpy as np                 # ← 상단 이동 (항상 정의됨)
-import pandas as pd                # ← 상단 이동 (항상 정의됨)
+import os
+import numpy as np
+import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 
@@ -86,7 +86,11 @@ type_color_map = {
 # 1. 사이드바 메뉴
 # ──────────────────────────────────────────────
 st.sidebar.title("메뉴")
-menu = st.sidebar.radio("이동", ["서론", "막대그래프", "히스토그램"])
+menu = st.sidebar.radio(
+    "이동",
+    ["서론", "막대그래프", "히스토그램", "히스토그램2"],
+    key="menu_radio",
+)
 
 # ──────────────────────────────────────────────
 # 2. 공통 제목
@@ -192,9 +196,74 @@ elif menu == "막대그래프":
         )
 
 # ──────────────────────────────────────────────
-# 5. 히스토그램
+# 5. 히스토그램  (원래 첫 번째 코드 — 유지)
+#    그룹 0/1 × 3속성 = 6개, 사이드바 그룹·속성 선택
 # ──────────────────────────────────────────────
 elif menu == "히스토그램":
+    col_sel, _ = st.columns([1, 5])
+    with col_sel:
+        group_choice = st.radio(
+            "그룹 선택",
+            ["0 (비환각)", "1 (환각)", "전체 비교 (6개 모두)"],
+            horizontal=True,
+            key="hist_group_radio",
+        )
+        attr_choice = st.radio(
+            "표시 속성",
+            score_cols,
+            horizontal=True,
+            key="hist_attr_radio",
+        )
+
+    n_total_0 = int((df["환각 발생 여부"] == 0).sum())
+    n_total_1 = int((df["환각 발생 여부"] == 1).sum())
+
+    def make_hist(data, attr, group_label, n_total):
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(
+            x=data[attr],
+            nbinsx=10,
+            histnorm="percent",
+            name=group_label,
+            marker_color="#4C78A8" if "0" in group_label else "#E45759",
+            opacity=0.85,
+            text=[f"n = {n_total}"] * len(data),
+            textposition="outside",
+        ))
+        fig.update_layout(
+            title=f"{group_label}  ·  {attr}  ·  n = {n_total}",
+            xaxis_title=attr,
+            yaxis_title="비율 (%)",
+            bargap=0.1,
+            margin=dict(l=40, r=20, t=50, b=40),
+            height=260,
+            showlegend=False,
+        )
+        fig.update_xaxes(range=[0, 1], tickangle=0)
+        fig.update_yaxes(ticksuffix="%")
+        return fig
+
+    if group_choice == "전체 비교 (6개 모두)":
+        ph = [[st.empty() for _ in range(3)] for _ in range(2)]
+
+        for ci, attr in enumerate(score_cols):
+            g0 = df[df["환각 발생 여부"] == 0]
+            ph[0][ci].write(make_hist(g0, attr, "그룹 0 (비환각)", n_total_0))
+
+            g1 = df[df["환각 발생 여부"] == 1]
+            ph[1][ci].write(make_hist(g1, attr, "그룹 1 (환각)", n_total_1))
+    else:
+        grp = 0 if "0" in group_choice else 1
+        grp_label = "그룹 0 (비환각)" if grp == 0 else "그룹 1 (환각)"
+        n_total   = n_total_0 if grp == 0 else n_total_1
+        sub = df[df["환각 발생 여부"] == grp]
+        st.write(make_hist(sub, attr_choice, grp_label, n_total))
+
+# ──────────────────────────────────────────────
+# 6. 히스토그램2  (문서 기반 새 코드 — 분리)
+#    환각 유형 × 점수 선택, 10개 빈, 유형별 전체표본수 대비 %
+# ──────────────────────────────────────────────
+elif menu == "히스토그램2":
     st.markdown("### 히스토그램 분석")
 
     col_chart, col_ctrl = st.columns([2, 1])
@@ -203,15 +272,15 @@ elif menu == "히스토그램":
         st.markdown("#### 분석 설정")
         sel_type = st.selectbox(
             "환각 유형",
-            ["Fabrication", "Contradiction", "Unrelated"],   # ← 오타 수정
+            ["Fabrication", "Contradiction", "Unrelated"],
             index=0,
-            key="hist_type",
+            key="hist2_type",
         )
         sel_score = st.selectbox(
             "분석 점수",
             score_cols,
             index=0,
-            key="hist_score",
+            key="hist2_score",
         )
 
     subset = df[df["환각 유형"] == sel_type]
@@ -291,7 +360,7 @@ elif menu == "히스토그램":
         type_counts = (
             df["환각 유형"]
             .value_counts()
-            .reindex(["Fabrication", "Contradiction", "Unrelated"], fill_value=0)  # ← 오타 수정
+            .reindex(["Fabrication", "Contradiction", "Unrelated"], fill_value=0)
             .reset_index()
         )
         type_counts.columns = ["환각유형", "표본수"]
