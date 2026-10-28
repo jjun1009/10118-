@@ -88,7 +88,7 @@ type_color_map = {
 st.sidebar.title("메뉴")
 menu = st.sidebar.radio(
     "이동",
-    ["서론", "막대그래프", "히스토그램", "히스토그램2"],
+    ["서론", "막대그래프", "히스토그램", "히트맵", "히스토그램2"],
     key="menu_radio",
 )
 
@@ -196,8 +196,7 @@ elif menu == "막대그래프":
         )
 
 # ──────────────────────────────────────────────
-# 5. 히스토그램  (원래 첫 번째 코드 — 유지)
-#    그룹 0/1 × 3속성 = 6개, 사이드바 그룹·속성 선택
+# 5. 히스토그램 (원래 첫 번째 코드 — 유지)
 # ──────────────────────────────────────────────
 elif menu == "히스토그램":
     col_sel, _ = st.columns([1, 5])
@@ -260,8 +259,177 @@ elif menu == "히스토그램":
         st.write(make_hist(sub, attr_choice, grp_label, n_total))
 
 # ──────────────────────────────────────────────
-# 6. 히스토그램2  (문서 기반 새 코드 — 분리)
-#    환각 유형 × 점수 선택, 10개 빈, 유형별 전체표본수 대비 %
+# 6. 히트맵  (신규 추가)
+#    X: 온도 설정값 / Y: 데이터베이스 유사도 점수
+#    셀 값: 해당 범주 내 환각률(%) = 환각행수/전체행수×100
+# ──────────────────────────────────────────────
+elif menu == "히트맵":
+    # ── 사이드바 오른쪽 상단 컨트롤 ──
+    col_c, col_g = st.columns([1, 1])
+    with col_c:
+        color_choice = st.radio(
+            "히트맵 색상",
+            ["붉은색", "푸른색", "초록색"],
+            horizontal=True,
+            key="heatmap_color_radio",
+        )
+    with col_g:
+        grid_n = st.radio(
+            "히트맵 형태",
+            ["5×5", "6×6", "7×7"],
+            horizontal=True,
+            key="heatmap_grid_radio",
+        )
+
+    n_cells = int(grid_n.split("×")[0])   # 5, 6, 7
+
+    # 색상 설정
+    if color_choice == "붉은색":
+        colorscale = [
+            [0,   "#fff5f5"],
+            [0.5, "#fca5a5"],
+            [1,   "#b91c1c"],
+        ]
+        cmin, cmax = 0, 100
+        colorbar_title = "환각률 (%)"
+    elif color_choice == "푸른색":
+        colorscale = [
+            [0,   "#f0f9ff"],
+            [0.5, "#38bdf8"],
+            [1,   "#0c4a6e"],
+        ]
+        cmin, cmax = 0, 100
+        colorbar_title = "환각률 (%)"
+    else:  # 초록색
+        colorscale = [
+            [0,   "#f0fdf4"],
+            [0.5, "#4ade80"],
+            [1,   "#166534"],
+        ]
+        cmin, cmax = 0, 100
+        colorbar_title = "환각률 (%)"
+
+    temp_col = "온도 설정값"
+    sim_col  = "데이터베이스 유사도 점수"
+
+    n_total_all = len(df)
+
+    # 구간 경계 계산 (분위수 기준, 중복 제거)
+    p = np.linspace(0, 1, n_cells + 1)
+    temp_edges = np.unique(np.quantile(df[temp_col], p))
+    sim_edges  = np.unique(np.quantile(df[sim_col],  p))
+
+    n_temp_bins = len(temp_edges) - 1
+    n_sim_bins  = len(sim_edges)  - 1
+
+    bin_labels_t = [f"Bin {i+1}" for i in range(n_temp_bins)]
+    bin_labels_s = [f"Bin {i+1}" for i in range(n_sim_bins)]
+
+    df["temp_bin"] = pd.cut(df[temp_col], bins=temp_edges, labels=bin_labels_t, include_lowest=True)
+    df["sim_bin"]  = pd.cut(df[sim_col],  bins=sim_edges,  labels=bin_labels_s, include_lowest=True)
+
+    # 환각률 집계
+    agg = (
+        df.groupby(["sim_bin", "temp_bin"], observed=True)
+        .agg(
+            전체_행수=("환각 발생 여부", "count"),
+            환각_행수=("환각 발생 여부", lambda x: (x == 1).sum()),
+        )
+        .reset_index()
+    )
+    agg["환각률(%)"] = (agg["환각_행수"] / agg["전체_행수"] * 100).round(2)
+
+    heatmap_data = agg.pivot_table(
+        index="sim_bin",
+        columns="temp_bin",
+        values="환각률(%)",
+        fill_value=0.0,
+    )
+    # 정렬: Bin1 → BinN 순서
+    heatmap_data = heatmap_data.reindex(index=bin_labels_s, columns=bin_labels_t, fill_value=0.0)
+
+    # count 매트릭스 (hover 용)
+    count_data = agg.pivot_table(
+        index="sim_bin",
+        columns="temp_bin",
+        values="전체_행수",
+        fill_value=0,
+    )
+    count_data = count_data.reindex(index=bin_labels_s, columns=bin_labels_t, fill_value=0)
+
+    fig_hm = go.Figure()
+
+    fig_hm.add_trace(
+        go.Heatmap(
+            z=heatmap_data.values,
+            x=bin_labels_t,
+            y=bin_labels_s,
+            colorscale=colorscale,
+            zmin=cmin,
+            zmax=cmax,
+            colorbar=dict(title=colorbar_title, thickness=15, len=0.8),
+            hoverongaps=False,
+            hovertemplate=(
+                "온도: %{x}<br>"
+                "유사도: %{y}<br>"
+                "환각률: %{z:.1f}%<br>"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig_hm.update_layout(
+        title=(
+            f"히트맵 — 온도 설정값 × 데이터베이스 유사도 점수  ·  "
+            f"환각률(%)  ·  {grid_n}  ·  전체 표본수: {n_total_all}행"
+        ),
+        xaxis_title=temp_col,
+        yaxis_title=sim_col,
+        xaxis=dict(
+            tickmode="array",
+            tickvals=bin_labels_t,
+            ticktext=[f" Bin {i+1}" for i in range(n_temp_bins)],
+        ),
+        yaxis=dict(
+            tickmode="array",
+            tickvals=bin_labels_s,
+            ticktext=[f"Bin {i+1}" for i in range(n_sim_bins)],
+            autorange="reversed",   # Bin1 이 위쪽
+        ),
+        template="plotly_white",
+        height=560,
+        margin=dict(l=60, r=30, t=80, b=60),
+    )
+
+    st.plotly_chart(fig_hm, use_container_width=True)
+
+    # ── 범주 경계값 + 전체 표본수 (그래프 아래) ──
+    st.markdown("#### 범주 경계값")
+
+    temp_tbl_rows = []
+    sim_tbl_rows  = []
+    for i in range(n_temp_bins):
+        lo = float(temp_edges[i])
+        hi = float(temp_edges[i+1])
+        temp_tbl_rows.append(f"온도 Bin {i+1}:  [{lo:.3f}, {hi:.3f})")
+    for i in range(n_sim_bins):
+        lo = float(sim_edges[i])
+        hi = float(sim_edges[i+1])
+        sim_tbl_rows.append(f"유사도 Bin {i+1}:  [{lo:.3f}, {hi:.3f})")
+
+    st.caption("■ 온도 설정값 구간")
+    for r in temp_tbl_rows:
+        st.caption(r)
+
+    st.caption("■ 데이터베이스 유사도 점수 구간")
+    for r in sim_tbl_rows:
+        st.caption(r)
+
+    st.caption(f"■ 전체 표본수: {n_total_all}행  (환각 발생: {(df['환각 발생 여부']==1).sum()}행 / "
+               f"비환각: {(df['환각 발생 여부']==0).sum()}행)")
+
+# ──────────────────────────────────────────────
+# 7. 히스토그램2  (문서 기반 — 분리 유지)
 # ──────────────────────────────────────────────
 elif menu == "히스토그램2":
     st.markdown("### 히스토그램 분석")
