@@ -81,7 +81,8 @@ if menu == "서론":
     1. 왼쪽 메뉴에서 **서론**, **막대그래프**, **산점도** 중 선택합니다.
     2. 사이드바에서 **입력 토큰 수 기준** / **답변 토큰 수 기준**을 전환합니다.
     3. 막대그래프 화면: 구간 개수(5/6/7)와 표본수 표시 여부를 조정하고 구간별 환각 발생률을 확인합니다.
-    4. 산점도 화면: y축 점수를 선택한 뒤, 온도 설정값 5개 구간별 산점도 5개를 나란히 확인합니다.
+    4. 산점도 화면: y축 점수를 선택하고, 온도 구간을 전환하며 구간별 산점도를 확인합니다.
+       필요하면 1000개 무작위 샘플링 토글로 데이터 양을 제한할 수 있습니다.
 
     ### 데이터
     - 원본 파일: `rag_hallucination.csv`
@@ -182,8 +183,6 @@ elif menu == "산점도":
         key="y_axis_selectbox_scatter",
     )
 
-    st.markdown("### 🌡️ 온도 설정값 구간별 산점도 (5개)")
-
     temp_bins = pd.cut(
         df["온도 설정값"],
         bins=5,
@@ -192,95 +191,113 @@ elif menu == "산점도":
     )
     df["온도 구간"] = temp_bins
 
-    temp_summary = (
-        df.groupby("온도 구간", observed=False)
-        .agg(
-            전체_행수=("환각 발생 여부", "count"),
-            환각_행수=("환각 발생 여부", lambda x: (x == 1).sum()),
-        )
-        .reset_index()
+    temp_labels = temp_bins.cat.categories.tolist()
+
+    selected_interval = st.sidebar.selectbox(
+        "볼 온도 구간 선택",
+        options=temp_labels,
+        index=0,
+        key="interval_selectbox",
     )
 
-    cols = st.columns(5)
+    use_sampling = st.sidebar.checkbox(
+        "1000개 무작위 샘플링",
+        value=False,
+        help="선택한 구간의 데이터를 최대 1000개로 무작위 추출합니다. 대용량 데이터에서 렌더링 속도를 높일 때 사용합니다.",
+        key="sampling_checkbox",
+    )
 
-    for idx, (_, row) in enumerate(temp_summary.iterrows()):
-        interval_label = row["온도 구간"]
-        interval_df = df[df["온도 구간"] == interval_label].dropna(
-            subset=["복잡도 지수", y_col, "환각 발생 여부"]
+    st.markdown("### 🌡️ 온도 설정값 구간별 산점도")
+
+    interval_df = df[df["온도 구간"] == selected_interval].copy()
+
+    full_count = len(interval_df)
+    if use_sampling and full_count > 1000:
+        interval_df = interval_df.sample(n=1000, random_state=42)
+        sampled_count = 1000
+    else:
+        sampled_count = full_count
+
+    st.markdown(f"**{selected_interval}**")
+    st.caption(
+        f"전체 행수: {full_count}행 · "
+        f"표시 행수: {sampled_count}행"
+        + (" (1000개 무작위 샘플링 적용)" if use_sampling and full_count > 1000 else "")
+    )
+
+    if len(interval_df) == 0:
+        st.warning("선택한 구간에 데이터가 없습니다.")
+    else:
+        df0_t = interval_df[interval_df["환각 발생 여부"] == 0]
+        df1_t = interval_df[interval_df["환각 발생 여부"] == 1]
+
+        fig_temp = go.Figure()
+
+        if len(df0_t) > 0:
+            fig_temp.add_trace(
+                go.Scatter(
+                    x=df0_t["복잡도 지수"],
+                    y=df0_t[y_col],
+                    mode="markers",
+                    name="환각 없음 (0)",
+                    marker=dict(
+                        color="blue",
+                        size=5,
+                        opacity=0.6,
+                        line=dict(width=0.5, color="white"),
+                    ),
+                    hovertemplate=(
+                        "복잡도 지수: %{x:.3f}<br>"
+                        f"{y_col}: %{{y:.3f}}<br>"
+                        "환각: 0<extra></extra>"
+                    ),
+                )
+            )
+
+        if len(df1_t) > 0:
+            fig_temp.add_trace(
+                go.Scatter(
+                    x=df1_t["복잡도 지수"],
+                    y=df1_t[y_col],
+                    mode="markers",
+                    name="환각 발생 (1)",
+                    marker=dict(
+                        color="red",
+                        size=5,
+                        opacity=0.6,
+                        line=dict(width=0.5, color="white"),
+                    ),
+                    hovertemplate=(
+                        "복잡도 지수: %{x:.3f}<br>"
+                        f"{y_col}: %{{y:.3f}}<br>"
+                        "환각: 1<extra></extra>"
+                    ),
+                )
+            )
+
+        fig_temp.update_layout(
+            xaxis_title="복잡도 지수",
+            yaxis_title=y_col,
+            template="plotly_white",
+            height=500,
+            margin=dict(l=40, r=20, t=30, b=40),
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=1.05,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=10),
+            ),
         )
 
-        with cols[idx]:
-            st.markdown(f"**{interval_label}**")
-            st.caption(
-                f"전체 {int(row['전체_행수'])}행 · 환각 {int(row['환각_행수'])}행"
-            )
+        st.plotly_chart(fig_temp, use_container_width=True, key="scatter_main")
 
-            if len(interval_df) == 0:
-                st.warning("데이터 없음")
-                continue
-
-            fig_temp = go.Figure()
-
-            df0_t = interval_df[interval_df["환각 발생 여부"] == 0]
-            df1_t = interval_df[interval_df["환각 발생 여부"] == 1]
-
-            if len(df0_t) > 0:
-                fig_temp.add_trace(
-                    go.Scatter(
-                        x=df0_t["복잡도 지수"],
-                        y=df0_t[y_col],
-                        mode="markers",
-                        name="0",
-                        marker=dict(
-                            color="blue",
-                            size=5,
-                            opacity=0.6,
-                            line=dict(width=0.5, color="white"),
-                        ),
-                        hovertemplate=(
-                            "복잡도 지수: %{x:.3f}<br>"
-                            f"{y_col}: %{{y:.3f}}<br>"
-                            "환각: 0<extra></extra>"
-                        ),
-                    )
-                )
-
-            if len(df1_t) > 0:
-                fig_temp.add_trace(
-                    go.Scatter(
-                        x=df1_t["복잡도 지수"],
-                        y=df1_t[y_col],
-                        mode="markers",
-                        name="1",
-                        marker=dict(
-                            color="red",
-                            size=5,
-                            opacity=0.6,
-                            line=dict(width=0.5, color="white"),
-                        ),
-                        hovertemplate=(
-                            "복잡도 지수: %{x:.3f}<br>"
-                            f"{y_col}: %{{y:.3f}}<br>"
-                            "환각: 1<extra></extra>"
-                        ),
-                    )
-                )
-
-            fig_temp.update_layout(
-                xaxis_title="복잡도 지수",
-                yaxis_title=y_col,
-                template="plotly_white",
-                height=320,
-                margin=dict(l=40, r=20, t=30, b=40),
-                showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="top",
-                    y=1.05,
-                    xanchor="center",
-                    x=0.5,
-                    font=dict(size=10),
-                ),
-            )
-
-            st.plotly_chart(fig_temp, use_container_width=True, key=f"temp_fig_{idx}")
+        st.subheader("📋 구간 데이터 요약")
+        display_df = interval_df[["복잡도 지수", y_col, "환각 발생 여부"]].copy()
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+        )
