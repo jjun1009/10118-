@@ -60,10 +60,12 @@ if "menu" not in st.session_state:
 
 menu = st.sidebar.radio(
     "메뉴",
-    ["서론", "막대그래프", "산점도", "히스토그램"],
+    ["서론", "막대그래프", "산점도", "히스토그램", "상자그림"],
     index=0 if st.session_state.menu == "서론" else (
         1 if st.session_state.menu == "막대그래프" else (
-            2 if st.session_state.menu == "산점도" else 3
+            2 if st.session_state.menu == "산점도"else(
+                3 if st.session_state.menu == "히스토그램"
+            ) else 4
         )
     ),
     label_visibility="collapsed",
@@ -462,3 +464,209 @@ elif menu == "히스토그램":
         use_container_width=True,
         hide_index=True,
     )
+elif menu == "상자그림":
+    st.markdown("### 환각유형별·점수별 상자그림 (3 × 3)")
+
+    # ── 세션스테이트 초기화 (처음 실행 시) ──
+    if "box_hallucination_type" not in st.session_state:
+        st.session_state["box_hallucination_type"] = "전체"
+    if "box_show_stats" not in st.session_state:
+        st.session_state["box_show_stats"] = True
+
+    hallucination_type_options = [
+        "전체",
+        "Fabrication",
+        "Contradiction",
+        "Unrelated",
+    ]
+
+    # ── 사이드바: 환각유형 선택 + 통계 표시 토글 ──
+    with st.sidebar:
+        st.markdown("#### 상자그림 설정")
+        box_hallucination_type = st.selectbox(
+            "환각유형 값",
+            options=hallucination_type_options,
+            index=0,
+            help="표시할 환각유형을 선택합니다. '전체' 선택 시 Fabrication·Contradiction·Unrelated 3행 모두 표시합니다.",
+            key="box_hallucination_type_selectbox",
+        )
+        st.session_state["box_hallucination_type"] = box_hallucination_type
+
+        box_show_stats = st.checkbox(
+            "Q1·Q3·중앙값 표시 (데이터 점 포함)",
+            value=True,
+            help="토글 ON: Q1·Q3·중앙값 + 데이터 점(모든 표본) + 평균선 표시. "
+                 "토글 OFF: Q1·Q3·중앙값 구조만 표시(데이터 점 숨김).",
+            key="box_show_stats_checkbox",
+        )
+        st.session_state["box_show_stats"] = box_show_stats
+
+    # ── 오른쪽 상단: 선택 정보 + 토글 상태 ──
+    info_box = st.container()
+    with info_box:
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.markdown(
+                f"**선택 환각유형:** `{box_hallucination_type}`"
+            )
+        with c2:
+            st.markdown(
+                f"**통계 요소 표시:** "
+                f"{'ON (Q1·Q3·중앙값 + 데이터 점 + 평균선)' if box_show_stats else 'OFF (구조만)'}"
+            )
+
+    # ── 점수 3종 정의 ──
+    score_cols = [
+        "개체 일치 점수",
+        "답변 관련성 점수",
+        "문맥 충실도 점수",
+    ]
+    score_labels = [
+        "개체 일치 점수",
+        "답변 관련성 점수",
+        "문맥 충실도 점수",
+    ]
+
+    # ── 환각유형 종류(전체일 때 사용) ──
+    hallucination_types = [
+        "Fabrication",
+        "Contradiction",
+        "Unrelated",
+    ]
+
+    # ── 표시 대상 데이터 ──
+    if box_hallucination_type == "전체":
+        df_plot = df.copy()
+        types_to_plot = hallucination_types
+        n_rows = 3
+    else:
+        df_plot = df[df["환각 유형"] == box_hallucination_type].copy()
+        types_to_plot = [box_hallucination_type]
+        n_rows = 1
+
+    # y축 범위 통일을 위한 각 점수별 전체 데이터 기준 최소·최대
+    y_range_per_score = {}
+    for sc in score_cols:
+        y_min_s = max(df[sc].min() * 0.95, 0)
+        y_max_s = df[sc].max() * 1.05
+        y_range_per_score[sc] = (y_min_s, y_max_s)
+
+    # ── 3×3 서브플롯 생성 ──
+    fig = make_subplots(
+        rows=n_rows,
+        cols=3,
+        subplot_titles=[
+            f"{ht} · ({sl})" for ht in types_to_plot for sl in score_labels
+        ],
+        horizontal_spacing=0.12,
+        vertical_spacing=0.18,
+    )
+
+    # 통계 표시 모드 결정
+    if box_show_stats:
+        boxmean_mode = "sd"          # 평균+표준편차 범위 표시
+        boxpoints_mode = "all"       # 모든 데이터 점 표시
+    else:
+        boxmean_mode = False          # 평균선 미표시
+        boxpoints_mode = "none"       # 데이터 점 숨김 (구조만)
+
+    row_idx = 1
+    for ht in types_to_plot:
+        col_idx = 1
+        for sc in score_cols:
+            subset = df_plot[df_plot["환각 유형"] == ht]
+            if len(subset) == 0:
+                # 데이터가 없으면 빈 trace 대신 공백 처리용 더미 추가
+                fig.add_trace(
+                    go.Scatter(
+                        x=[],
+                        y=[],
+                        mode="lines",
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ),
+                    row=row_idx,
+                    col=col_idx,
+                )
+            else:
+                fig.add_trace(
+                    go.Box(
+                        x=subset["복잡도 구간"].astype(str),
+                        y=subset[sc],
+                        name=f"{ht}",
+                        boxmean=boxmean_mode,
+                        boxpoints=boxpoints_mode,
+                        jitter=0.3,
+                        pointpos=-1.8,
+                        marker_color=(
+                            "#1f77b4" if ht == "Fabrication"
+                            else "#d62728" if ht == "Contradiction"
+                            else "#2ca02c"
+                        ),
+                        hovertemplate=(
+                            f"점수: %{{y:.3f}}<br>"
+                            f"구간: %{{x}}<br>"
+                            f"환각유형: {ht}<br>"
+                            f"{sc}: %{{y:.3f}}<extra></extra>"
+                        ),
+                    ),
+                    row=row_idx,
+                    col=col_idx,
+                )
+
+                # y축 범위 통일
+                y_min_s, y_max_s = y_range_per_score[sc]
+                fig.update_yaxes(
+                    range=[y_min_s, y_max_s],
+                    row=row_idx,
+                    col=col_idx,
+                    title_text="",
+                )
+
+                # x축 제목 제거(subplot_titles에 정보 포함)
+                fig.update_xaxes(
+                    title_text="",
+                    row=row_idx,
+                    col=col_idx,
+                )
+
+            col_idx += 1
+        row_idx += 1
+
+    # ── 레이아웃 마무리 ──
+    row_height = 280 if n_rows == 3 else 360
+    fig.update_layout(
+        height=300 * n_rows + 80,
+        width=1100,
+        showlegend=(n_rows == 1 and len(types_to_plot) > 0),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=1.08,
+            xanchor="center",
+            x=0.5,
+        ),
+        margin=dict(l=40, r=30, t=60, b=50),
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ── 총 표본수 + 환각유형별 표본수 ──
+    st.markdown("### 표본수 요약")
+    total_n = len(df_plot)
+    st.caption(f"**전체 표본수: {total_n}행**")
+
+    type_counts = (
+        df_plot["환각 유형"]
+        .value_counts()
+        .reindex(hallucination_types, fill_value=0)
+        .reset_index()
+    )
+    type_counts.columns = ["환각유형", "표본수"]
+    type_counts["표본수"] = type_counts["표본수"].astype(int)
+
+    st.dataframe(
+        type_counts,
+        use_container_width=True,
+        hide_index=True,
+    )    
