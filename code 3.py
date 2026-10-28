@@ -63,11 +63,11 @@ if "menu" not in st.session_state:
 
 menu = st.sidebar.radio(
     "메뉴",
-    ["서론", "막대그래프", "산점도", "히스토그램", "상자그림"],
+    ["서론", "막대그래프", "산점도", "상자그림", "히스토그램"],
     index=0 if st.session_state.menu == "서론" else (
         1 if st.session_state.menu == "막대그래프" else (
             2 if st.session_state.menu == "산점도"else(
-                3 if st.session_state.menu == "히스토그램" else 4
+                3 if st.session_state.menu == "상자그림" else 4
             )
         )
     ),
@@ -311,7 +311,7 @@ elif menu == "산점도":
             hide_index=True,
         )
 
-elif menu == "히스토그램":
+elif menu == "상자그림":
     st.markdown("### 문장복잡도 지수 구간별 상자그림 (환각 발생 여부 전체)")
 
     col_left, col_right = st.columns([1, 1])
@@ -468,99 +468,110 @@ elif menu == "히스토그램":
         hide_index=True,
     )
 
-    # ── y축 범위: 점수별 전체 df 기준(메뉴 선택과 무관하게 통일) ──
-    y_range_per_score = {}
-    for sc in score_cols:
-        y_range_per_score[sc] = (df[sc].min(), df[sc].max())
+elif menu == "히스토그램":
+    import plotly.graph_objects as go
+    import numpy as np
 
-    # ── 표시 대상 데이터로 px.box용 프레임 준비 ──
-    # facet_col에 쓸 숫자 인덱스 컬럼 추가(subplot_titles 순서 고정용)
-    col_order = {sc: i for i, sc in enumerate(score_cols)}
-    df_plot["_score_idx"] = df_plot[score_cols].apply(
-        lambda r: next(i for i, sc in enumerate(score_cols) if pd.notna(r[sc])),
-        axis=1,
+    st.markdown("### 히스토그램 분석")
+
+    # ── 사이드바: 환각유형 + 분석 점수 선택 ──
+    with st.sidebar:
+        st.markdown("#### 분석 설정")
+        sel_type = st.selectbox(
+            "환각 유형",
+            ["Fabrication", "Contradiction", "Unrelated"],
+            index=0,
+            key="hist_type",
+        )
+        sel_score = st.selectbox(
+            "분석 점수",
+            score_cols,
+            index=0,
+            key="hist_score",
+        )
+
+    # ── 데이터 필터링 ──
+    subset = df[df["환각 유형"] == sel_type]
+    y_vals = subset[sel_score].dropna()
+    total_n = len(subset)  # 선택된 환각유형의 전체 행수(NaN 포함)
+
+    if len(y_vals) == 0:
+        st.warning(
+            f"선택된 환각유형 '{sel_type}'에 점수 '{sel_score}' 데이터가 없습니다."
+        )
+        st.stop()
+
+    # ── 표시용 점수 이름(score_labels가 있으면 사용, 없으면 컬럼명) ──
+    score_kr = score_labels.get(sel_score, sel_score) if "score_labels" in dir() else sel_score
+
+    # ── 정보 표시 (상단) ──
+    st.markdown(
+        f"**환각유형:** {sel_type}  |  **분석 점수:** {score_kr}  |  "
+        f"**총 표본수:** {total_n}행"
     )
 
-    # facet_row 라벨 → subplot_titles와 동일한 형태
-    df_plot["_facet_label"] = df_plot["환각 유형"] + " · (" + df_plot["환각 유형"].map(
-        {ht: next(
-            f"{ht} · ({sc})"
-            for sc in score_cols
-        ) for ht in types_to_plot}
-    ) + ")"
+    # ── 10개 빈 수동 계산 (y축: 전체표본수 대비 백분율 %) ──
+    counts, bin_edges = np.histogram(y_vals, bins=10)
+    pct = counts / total_n * 100          # 전체표본수(total_n) 기준 %
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
-    # 색조: 환각유형별 고정 색
-    color_map = {
-        "Fabrication": "#1f77b4",
-        "Contradiction": "#d62728",
-        "Unrelated": "#2ca02c",
-    }
+    fig = go.Figure()
 
-    fig = px.box(
-        df_plot,
-        x="환각 유형",
-        y=score_cols,          # 3개 점수 컬럼을 한 번에 지정
-        color="환각 유형",
-        facet_row="환각 유형",
-        facet_col="_score_idx",
-        color_discrete_map=color_map,
-        points=False,          # 상자 구조만 — 정확한 직사각형
-        hover_data={
-            "환각 유형": True,
-            "_score_idx": False,
-            "_facet_label": False,
-        },
-        labels={
-            "환각 유형": "환각 유형",
-            "_score_idx": "",
-        },
-    )
-
-    # ── facet 제목/축 정리 ──
-    # subplot_titles 대체: facet 제목에 "환각유형 · (점수)" 형태
-    fig.for_each_annotation(
-        lambda a: a.update(
-            text=a.text.replace("환각 유형=", "").replace("=_score_idx", ""),
-            showarrow=False,
+    fig.add_trace(
+        go.Bar(
+            x=bin_centers,
+            y=pct,
+            name=sel_score,
+            marker_color=type_color_map.get(sel_type, "#4c78a8"),
+            opacity=0.85,
+            hovertemplate=(
+                "점수 구간: %{x:.3f}<br>"
+                "비율: %{y:.2f}%<extra></extra>"
+            ),
         )
     )
 
-    # y축 범위 통일(점수별로 전체 데이터 기준)
-    for sc in score_cols:
-        y_min_all, y_max_all = y_range_per_score[sc]
-        fig.update_yaxes(
-            range=[y_min_all, y_max_all],
-            col=score_cols.index(sc) + 1,
-        )
+    # ── 축 범위/레이블 ──
+    x_min = float(y_vals.min())
+    x_max = float(y_vals.max())
 
-    # x축 라벨/제목 제거
-    fig.update_xaxes(title_text="", showticklabels=True)
-    fig.update_yaxes(title_text="")
+    fig.update_xaxes(
+        range=[x_min, x_max],
+        title_text=score_kr,
+        tickformat=".3f",
+    )
+    fig.update_yaxes(
+        title_text="비율(%)",
+        range=[0, max(100, pct.max() * 1.15)],
+    )
 
-    # ── 레이아웃 ──
-    n_facet_rows = df_plot["환각 유형"].nunique()
     fig.update_layout(
-        height=300 * n_facet_rows + 80,
-        width=1100,
-        margin=dict(l=40, r=30, t=60, b=50),
-        legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=1.08,
-            xanchor="center",
-            x=0.5,
+        title=(
+            f"히스토그램 — {sel_type} · {score_kr}<br>"
+            f"(총 표본수: {total_n}행 · 10개 빈 · y축: 해당 환각유형 전체표본수 대비 %)"
         ),
+        height=420,
+        margin=dict(l=50, r=30, t=90, b=55),
+        bargap=0.12,
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # ── 표본수 요약 ──
-    st.markdown("### 표본수 요약")
-    total_n = len(df_plot)
-    st.caption(f"**전체 표본수: {total_n}행**")
+    # ── 분포 요약 ──
+    st.markdown("### 분포 요약")
+    st.caption(
+        f"선택 환각유형 **{sel_type}**의 전체 표본수: **{total_n}행**  "
+        f"(점수 결측 제외: {len(y_vals)}행)"
+    )
+    st.caption(
+        f"평균 {y_vals.mean():.3f} · 중앙값 {y_vals.median():.3f} · "
+        f"표준편차 {y_vals.std():.3f} · 최소 {y_vals.min():.3f} · 최대 {y_vals.max():.3f}"
+    )
 
+    # ── 유형별 표본수 요약표 ──
+    st.markdown("### 유형별 표본수")
     type_counts = (
-        df_plot["환각 유형"]
+        df["환각 유형"]
         .value_counts()
         .reindex(["Fabrication", "Contradiction", "Unrelated"], fill_value=0)
         .reset_index()
@@ -568,8 +579,4 @@ elif menu == "히스토그램":
     type_counts.columns = ["환각유형", "표본수"]
     type_counts["표본수"] = type_counts["표본수"].astype(int)
 
-    st.dataframe(
-        type_counts,
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(type_counts, use_container_width=True, hide_index=True)
