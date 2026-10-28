@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import numpy as np
 
 st.set_page_config(page_title="LLM Hallucination Analyzer", layout="wide")
 
@@ -81,9 +80,8 @@ if menu == "서론":
     ### 사용 방법
     1. 왼쪽 메뉴에서 **서론**, **막대그래프**, **산점도** 중 선택합니다.
     2. 사이드바에서 **입력 토큰 수 기준** / **답변 토큰 수 기준**을 전환합니다.
-    3. 막대그래프 화면에서 구간별 환각 발생률을 확인합니다.
-    4. 산점도 화면에서 복잡도 지수와 각 점수 간 관계를 색상으로 확인하고,  
-       그룹별 또는 전체 데이터에 대해 추세선과 상관계수를 표시할 수 있습니다.
+    3. 막대그래프 화면: 구간 개수(5/6/7)와 표본수 표시 여부를 조정하고 구간별 환각 발생률을 확인합니다.
+    4. 산점도 화면: y축 점수를 선택한 뒤, 온도 설정값 5개 구간별 산점도 5개를 나란히 확인합니다.
 
     ### 데이터
     - 원본 파일: `rag_hallucination.csv`
@@ -114,13 +112,13 @@ elif menu == "막대그래프":
 
     st.markdown(f"### {version} — 구간별 환각 발생률")
 
-    bins = pd.cut(
+    bins_df = pd.cut(
         df[token_col],
         bins=n_bins,
         labels=[f"구간 {i+1}" for i in range(n_bins)],
         include_lowest=True,
     )
-    df["토큰 구간"] = bins
+    df["토큰 구간"] = bins_df
 
     summary = (
         df.groupby("토큰 구간", observed=True)
@@ -134,8 +132,8 @@ elif menu == "막대그래프":
         summary["환각_행수"] / summary["전체_행수"] * 100
     ).round(2)
 
-    fig = go.Figure()
-    fig.add_trace(
+    fig_bar = go.Figure()
+    fig_bar.add_trace(
         go.Bar(
             x=summary["토큰 구간"],
             y=summary["환각_발생률(%)"],
@@ -144,7 +142,7 @@ elif menu == "막대그래프":
             marker_color="steelblue",
         )
     )
-    fig.update_layout(
+    fig_bar.update_layout(
         xaxis_title=token_col,
         yaxis_title="환각 발생률 (%)",
         yaxis_range=[0, max(summary["환각_발생률(%)"].max() * 1.2, 10)],
@@ -152,7 +150,7 @@ elif menu == "막대그래프":
         height=500,
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_bar, use_container_width=True)
 
     if show_counts:
         st.subheader("📋 구간별 상세 통계")
@@ -170,243 +168,119 @@ elif menu == "막대그래프":
         )
 
 elif menu == "산점도":
-    st.markdown("### 복잡도 지수 vs 점수 — 산점도")
-
     y_options = [
         "개체 일치 점수",
         "답변 관련성 점수",
         "문맥 충실도 점수",
     ]
 
-    col_left, col_right = st.columns([1, 1])
+    st.sidebar.markdown("### 📍 산점도 설정")
+    y_col = st.sidebar.selectbox(
+        "y축 점수 선택",
+        options=y_options,
+        index=0,
+        key="y_axis_selectbox_scatter",
+    )
 
-    with col_left:
-        y_col = st.selectbox(
-            "y축 속성 선택",
-            options=y_options,
-            index=0,
-            help="산점도의 y축에 표시할 점수를 선택합니다.",
-            key="y_axis_selectbox",
+    st.markdown("### 🌡️ 온도 설정값 구간별 산점도 (5개)")
+
+    temp_bins = pd.cut(
+        df["온도 설정값"],
+        bins=5,
+        labels=[f"온도 구간 {i+1}" for i in range(5)],
+        include_lowest=True,
+    )
+    df["온도 구간"] = temp_bins
+
+    temp_summary = (
+        df.groupby("온도 구간", observed=False)
+        .agg(
+            전체_행수=("환각 발생 여부", "count"),
+            환각_행수=("환각 발생 여부", lambda x: (x == 1).sum()),
         )
-        use_overall = st.checkbox(
-            "전체 데이터 모드",
-            value=False,
-            help="그룹 구분 없이 전체 데이터로 하나의 산점도·추세선·상관계수를 표시합니다.",
-            key="overall_mode_checkbox",
+        .reset_index()
+    )
+
+    cols = st.columns(5)
+
+    for idx, (_, row) in enumerate(temp_summary.iterrows()):
+        interval_label = row["온도 구간"]
+        interval_df = df[df["온도 구간"] == interval_label].dropna(
+            subset=["복잡도 지수", y_col, "환각 발생 여부"]
         )
 
-    with col_right:
-        if not use_overall:
-            show_group_0 = st.checkbox(
-                "환각 0군 표시 (파란색)",
-                value=True,
-                help="환각 발생 여부가 0인 그룹을 산점도에 표시합니다.",
-                key="show_group0_checkbox",
+        with cols[idx]:
+            st.markdown(f"**{interval_label}**")
+            st.caption(
+                f"전체 {int(row['전체_행수'])}행 · 환각 {int(row['환각_행수'])}행"
             )
-            show_group_1 = st.checkbox(
-                "환각 1군 표시 (빨간색)",
-                value=True,
-                help="환각 발생 여부가 1인 그룹을 산점도에 표시합니다.",
-                key="show_group1_checkbox",
-            )
-            show_trend_0 = st.checkbox(
-                "0군 추세선 표시",
-                value=False,
-                help="환각 0군의 선형 추세선(회귀선)을 표시합니다.",
-                key="trend0_checkbox",
-            )
-            show_trend_1 = st.checkbox(
-                "1군 추세선 표시",
-                value=False,
-                help="환각 1군의 선형 추세선(회귀선)을 표시합니다.",
-                key="trend1_checkbox",
-            )
-            show_corr_0 = st.checkbox(
-                "0군 상관계수(r) 표시",
-                value=False,
-                help="환각 0군의 피어슨 상관계수를 그래프에 텍스트로 표시합니다.",
-                key="corr0_checkbox",
-            )
-            show_corr_1 = st.checkbox(
-                "1군 상관계수(r) 표시",
-                value=False,
-                help="환각 1군의 피어슨 상관계수를 그래프에 텍스트로 표시합니다.",
-                key="corr1_checkbox",
-            )
-        else:
-            show_trend_all = st.checkbox(
-                "전체 추세선 표시",
-                value=False,
-                help="전체 데이터의 선형 추세선(회귀선)을 표시합니다.",
-                key="trend_all_checkbox",
-            )
-            show_corr_all = st.checkbox(
-                "전체 상관계수(r) 표시",
-                value=False,
-                help="전체 데이터의 피어슨 상관계수를 그래프에 텍스트로 표시합니다.",
-                key="corr_all_checkbox",
-            )
-            show_group_0 = False
-            show_group_1 = False
-            show_trend_0 = False
-            show_trend_1 = False
-            show_corr_0 = False
-            show_corr_1 = False
 
-    plot_df = df[["복잡도 지수", y_col, "환각 발생 여부"]].dropna()
+            if len(interval_df) == 0:
+                st.warning("데이터 없음")
+                continue
 
-    fig = go.Figure()
+            fig_temp = go.Figure()
 
-    def add_trend_and_corr(fig, x_vals, y_vals, label, color, show_trend, show_corr):
-        if show_trend and len(x_vals) >= 2:
-            slope, intercept = np.polyfit(x_vals, y_vals, 1)
-            x_line = np.array([x_vals.min(), x_vals.max()])
-            y_line = slope * x_line + intercept
-            fig.add_trace(
-                go.Scatter(
-                    x=x_line,
-                    y=y_line,
-                    mode="lines",
-                    name=f"{label} 추세선",
-                    line=dict(color=color, width=2, dash="dash"),
-                    showlegend=False,
-                    hoverinfo="skip",
+            df0_t = interval_df[interval_df["환각 발생 여부"] == 0]
+            df1_t = interval_df[interval_df["환각 발생 여부"] == 1]
+
+            if len(df0_t) > 0:
+                fig_temp.add_trace(
+                    go.Scatter(
+                        x=df0_t["복잡도 지수"],
+                        y=df0_t[y_col],
+                        mode="markers",
+                        name="0",
+                        marker=dict(
+                            color="blue",
+                            size=5,
+                            opacity=0.6,
+                            line=dict(width=0.5, color="white"),
+                        ),
+                        hovertemplate=(
+                            "복잡도 지수: %{x:.3f}<br>"
+                            f"{y_col}: %{{y:.3f}}<br>"
+                            "환각: 0<extra></extra>"
+                        ),
+                    )
                 )
-            )
-        if show_corr and len(x_vals) >= 2:
-            r = np.corrcoef(x_vals, y_vals)[0, 1]
-            fig.add_annotation(
-                text=f"r = {r:.3f}",
-                xref="paper",
-                yref="paper",
-                x=0.98,
-                y=0.02,
-                xanchor="right",
-                yanchor="bottom",
-                showarrow=False,
-                font=dict(color=color, size=14),
-            )
 
-    if use_overall:
-        x_all = plot_df["복잡도 지수"].values
-        y_all = plot_df[y_col].values
-        fig.add_trace(
-            go.Scatter(
-                x=x_all,
-                y=y_all,
-                mode="markers",
-                name="전체",
-                marker=dict(
-                    color="purple",
-                    size=6,
-                    opacity=0.6,
-                    line=dict(width=0.5, color="white"),
+            if len(df1_t) > 0:
+                fig_temp.add_trace(
+                    go.Scatter(
+                        x=df1_t["복잡도 지수"],
+                        y=df1_t[y_col],
+                        mode="markers",
+                        name="1",
+                        marker=dict(
+                            color="red",
+                            size=5,
+                            opacity=0.6,
+                            line=dict(width=0.5, color="white"),
+                        ),
+                        hovertemplate=(
+                            "복잡도 지수: %{x:.3f}<br>"
+                            f"{y_col}: %{{y:.3f}}<br>"
+                            "환각: 1<extra></extra>"
+                        ),
+                    )
+                )
+
+            fig_temp.update_layout(
+                xaxis_title="복잡도 지수",
+                yaxis_title=y_col,
+                template="plotly_white",
+                height=320,
+                margin=dict(l=40, r=20, t=30, b=40),
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="top",
+                    y=1.05,
+                    xanchor="center",
+                    x=0.5,
+                    font=dict(size=10),
                 ),
-                hovertemplate=(
-                    "복잡도 지수: %{x:.3f}<br>"
-                    f"{y_col}: %{{y:.3f}}<br>"
-                    "환각 발생 여부: %{customdata}<extra></extra>"
-                ),
-                customdata=plot_df["환각 발생 여부"].values,
             )
-        )
-        add_trend_and_corr(
-            fig, x_all, y_all, "전체", "purple",
-            show_trend_all, show_corr_all,
-        )
-    else:
-        if show_group_0:
-            df_0 = plot_df[plot_df["환각 발생 여부"] == 0]
-            fig.add_trace(
-                go.Scatter(
-                    x=df_0["복잡도 지수"],
-                    y=df_0[y_col],
-                    mode="markers",
-                    name="환각 없음 (0)",
-                    marker=dict(
-                        color="blue",
-                        size=6,
-                        opacity=0.6,
-                        line=dict(width=0.5, color="white"),
-                    ),
-                    hovertemplate=(
-                        "복잡도 지수: %{x:.3f}<br>"
-                        f"{y_col}: %{{y:.3f}}<br>"
-                        "환각 발생 여부: 0<extra></extra>"
-                    ),
-                )
-            )
-            if len(df_0) > 0:
-                add_trend_and_corr(
-                    fig,
-                    df_0["복잡도 지수"].values,
-                    df_0[y_col].values,
-                    "환각 없음 (0)",
-                    "blue",
-                    show_trend_0,
-                    show_corr_0,
-                )
 
-        if show_group_1:
-            df_1 = plot_df[plot_df["환각 발생 여부"] == 1]
-            fig.add_trace(
-                go.Scatter(
-                    x=df_1["복잡도 지수"],
-                    y=df_1[y_col],
-                    mode="markers",
-                    name="환각 발생 (1)",
-                    marker=dict(
-                        color="red",
-                        size=6,
-                        opacity=0.6,
-                        line=dict(width=0.5, color="white"),
-                    ),
-                    hovertemplate=(
-                        "복잡도 지수: %{x:.3f}<br>"
-                        f"{y_col}: %{{y:.3f}}<br>"
-                        "환각 발생 여부: 1<extra></extra>"
-                    ),
-                )
-            )
-            if len(df_1) > 0:
-                add_trend_and_corr(
-                    fig,
-                    df_1["복잡도 지수"].values,
-                    df_1[y_col].values,
-                    "환각 발생 (1)",
-                    "red",
-                    show_trend_1,
-                    show_corr_1,
-                )
-
-    has_data = len(plot_df) > 0
-    if not has_data:
-        st.warning("표시할 데이터가 없습니다.")
-    else:
-        fig.update_layout(
-            xaxis_title="복잡도 지수",
-            yaxis_title=y_col,
-            template="plotly_white",
-            height=500,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="center",
-                x=0.5,
-            ),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.subheader("📋 산점도 데이터 요약")
-        st.dataframe(
-            plot_df.rename(
-                columns={
-                    "복잡도 지수": "복잡도 지수",
-                    y_col: y_col,
-                    "환각 발생 여부": "환각 발생 여부",
-                }
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+            st.plotly_chart(fig_temp, use_container_width=True, key=f"temp_fig_{idx}")
