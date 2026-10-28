@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
+import numpy as np   # <-- 히스토그램에서 np.histogram 사용
 
 
 st.set_page_config(page_title="LLM Hallucination Analyzer", layout="wide")
@@ -36,6 +37,31 @@ rename_map = {
 }
 
 
+# ────────────────────────────────────────────────────────────
+# 히스토그램에서 사용할 전역 설정 (파일 상단에서 정의)
+#   score_cols  : 분석할 점수 컬럼명 리스트
+#   score_labels: 점수 컬럼 → 화면 표시용 한국어 이름 (선택)
+#   type_color_map: 환각유형 → 막대 색상
+# ────────────────────────────────────────────────────────────
+score_cols = [
+    "개체 일치 점수",
+    "답변 관련성 점수",
+    "문맥 충실도 점수",
+]
+
+score_labels = {
+    "개체 일치 점수":        "개체 일치 점수",
+    "답변 관련성 점수":      "답변 관련성 점수",
+    "문맥 충실도 점수":      "문맥 충실도 점수",
+}
+
+type_color_map = {
+    "Fabrication":   "#1f77b4",   # 파랑
+    "Contradiction": "#d62728",   # 빨강
+    "Unrelated":     "#2ca02c",   # 초록
+}
+
+
 @st.cache_data
 def load_data():
     df = pd.read_csv("rag_hallucination.csv")
@@ -63,12 +89,10 @@ if "menu" not in st.session_state:
 
 menu = st.sidebar.radio(
     "메뉴",
-    ["서론", "막대그래프", "산점도", "상자그림", "히스토그램"],
+    ["서론", "막대그래프", "산점도", "히스토그램"],
     index=0 if st.session_state.menu == "서론" else (
         1 if st.session_state.menu == "막대그래프" else (
-            2 if st.session_state.menu == "산점도"else(
-                3 if st.session_state.menu == "상자그림" else 4
-            )
+            2 if st.session_state.menu == "산점도" else 3
         )
     ),
     label_visibility="collapsed",
@@ -78,6 +102,9 @@ st.session_state.menu = menu
 
 st.title("LLM의 할루미네이션")
 
+# ============================================================
+# 1. 서론
+# ============================================================
 if menu == "서론":
     st.markdown("""
     ## 📝 개요
@@ -90,8 +117,10 @@ if menu == "서론":
     3. 막대그래프 화면: 구간 개수(5/6/7)와 표본수 표시 여부를 조정하고 구간별 환각 발생률을 확인합니다.
     4. 산점도 화면: y축 점수를 선택하고, 온도 구간을 전환하며 구간별 산점도를 확인합니다.
        필요하면 1000개 무작위 샘플링 토글로 데이터 양을 제한할 수 있습니다.
-    5. 히스토그램 화면: 문장복잡도 구간 개수(5/6/7)를 선택하고,  
-       환각이 발생한 행(Is_Hallucination=1)만 필터링하여 세 점수 중 하나의 분포를 퍼센트 비율로 확인합니다.
+    5. 히스토그램 화면: 오른쪽 상단에서 **환각 유형 1개**(Fabrication / Contradiction / Unrelated)와  
+       **분석 점수 1개**(개체 일치 점수 / 답변 관련성 점수 / 문맥 충실도 점수)를 선택합니다.  
+       선택한 환각유형에 해당하는 행만 필터링하여 **10개 빈**으로 나눈 히스토그램을 표시합니다.  
+       y축은 **해당 환각유형의 전체 표본수 대비 백분율(%)**이며, 상단에 총 표본수가 표시됩니다.
 
     ### 데이터
     - 원본 파일: `rag_hallucination.csv`
@@ -100,6 +129,9 @@ if menu == "서론":
       답변 관련성 점수, 문맥 충실도 점수, 환각 유형, 환각 발생 여부
     """)
 
+# ============================================================
+# 2. 막대그래프
+# ============================================================
 elif menu == "막대그래프":
     col_left, col_right = st.columns([1, 1])
 
@@ -177,6 +209,9 @@ elif menu == "막대그래프":
             hide_index=True,
         )
 
+# ============================================================
+# 3. 산점도
+# ============================================================
 elif menu == "산점도":
     y_options = [
         "개체 일치 점수",
@@ -311,171 +346,19 @@ elif menu == "산점도":
             hide_index=True,
         )
 
-elif menu == "상자그림":
-    st.markdown("### 문장복잡도 지수 구간별 상자그림 (환각 발생 여부 전체)")
-
-    col_left, col_right = st.columns([1, 1])
-
-    with col_left:
-        complexity_bins = st.selectbox(
-            "문장복잡도 구간 개수",
-            options=[5, 6, 7],
-            index=1,
-            help="문장복잡도 지수를 몇 개의 구간으로 나눌지 선택합니다.",
-            key="complexity_bins_selectbox",
-        )
-
-        hist_y_options = [
-            "개체 일치 점수",
-            "답변 관련성 점수",
-            "문맥 충실도 점수",
-        ]
-        hist_y_col = st.selectbox(
-            "표시할 속성",
-            options=hist_y_options,
-            index=0,
-            help="상자그림으로 표시할 점수를 선택합니다. 환각 발생 여부(0, 1) 전체 행을 표시합니다.",
-            key="hist_y_selectbox",
-        )
-
-    # 복잡도 구간으로 나누기 (구간 라벨)
-    def assign_complexity_bins(series, bins):
-        return pd.cut(
-            series,
-            bins=bins,
-            labels=[f"복잡도 구간 {i+1}" for i in range(bins)],
-            include_lowest=True,
-        )
-
-    # 전체 데이터 복잡도 구간
-    df["복잡도 구간"] = assign_complexity_bins(df["복잡도 지수"], complexity_bins)
-
-    st.markdown(f"### {hist_y_col} — 복잡도 구간별 상자그림 (환각 여부 전체 행)")
-
-    st.caption(
-        f"전체 행수: {len(df)}행 · "
-        f"환각 미발생(0): {(df['환각 발생 여부'] == 0).sum()}행 · "
-        f"환각 발생(1): {(df['환각 발생 여부'] == 1).sum()}행"
-    )
-
-    fig_box = go.Figure()
-
-    # 환각 발생 여부 == 1 (빨강)
-    df_hall = df[df["환각 발생 여부"] == 1]
-    for interval_label in df["복잡도 구간"].cat.categories:
-        subset = df_hall[df_hall["복잡도 구간"] == interval_label]
-        if len(subset) > 0:
-            fig_box.add_trace(
-                go.Box(
-                    name=str(interval_label),
-                    y=subset[hist_y_col],
-                    marker_color="crimson",
-                    boxpoints="outliers",
-                    jitter=0.3,
-                    pointpos=-1.8,
-                    hovertemplate=(
-                        f"{hist_y_col}: %{{y:.3f}}<br>"
-                        "구간: " + interval_label + "<br>"
-                        "환각 발생 여부: 1<extra></extra>"
-                    ),
-                )
-            )
-
-    # 환각 발생 여부 == 0 (파랑)
-    df_nonhall = df[df["환각 발생 여부"] == 0]
-    for interval_label in df["복잡도 구간"].cat.categories:
-        subset = df_nonhall[df_nonhall["복잡도 구간"] == interval_label]
-        if len(subset) > 0:
-            fig_box.add_trace(
-                go.Box(
-                    name=str(interval_label),
-                    y=subset[hist_y_col],
-                    marker_color="steelblue",
-                    boxpoints="outliers",
-                    jitter=0.3,
-                    pointpos=-1.8,
-                    hovertemplate=(
-                        f"{hist_y_col}: %{{y:.3f}}<br>"
-                        "구간: " + interval_label + "<br>"
-                        "환각 발생 여부: 0<extra></extra>"
-                    ),
-                )
-            )
-
-    # y축 범위 계산
-    y_min = min(
-        df[hist_y_col].min() * 0.95,
-        0,
-    )
-    y_max = df[hist_y_col].max() * 1.05
-
-    fig_box.update_layout(
-        xaxis_title="복잡도 구간",
-        yaxis_title=hist_y_col,
-        template="plotly_white",
-        height=450,
-        boxmode="group",
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=1.05,
-            xanchor="center",
-            x=0.5,
-            font=dict(size=10),
-        ),
-        yaxis_range=[y_min, y_max],
-    )
-
-    st.plotly_chart(fig_box, use_container_width=True)
-
-    st.subheader("📊 복잡도 구간·환각 여부별 통계")
-    grouped_stats = (
-        df.groupby(["복잡도 구간", "환각 발생 여부"], observed=True)[hist_y_col]
-        .agg(
-            행수=("count"),
-            평균=("mean"),
-            표준편차=("std"),
-            최소값=("min"),
-            중앙값=("median"),
-            최대값=("max"),
-        )
-        .reset_index()
-    )
-    grouped_stats["행수"] = grouped_stats["행수"].astype(int)
-    for col_name in ["평균", "표준편차", "최소값", "중앙값", "최대값"]:
-        grouped_stats[col_name] = grouped_stats[col_name].round(4)
-
-    grouped_stats = grouped_stats.rename(
-        columns={
-            "복잡도 구간": "복잡도 구간",
-            "환각 발생 여부": "환각 발생 여부",
-            "행수": "행수",
-            "평균": "평균",
-            "표준편차": "표준편차",
-            "최소값": "최소값",
-            "중앙값": "중앙값",
-            "최대값": "최대값",
-        }
-    )
-    grouped_stats = grouped_stats.sort_values(
-        ["복잡도 구간", "환각 발생 여부"]
-    )
-
-    st.dataframe(
-        grouped_stats,
-        use_container_width=True,
-        hide_index=True,
-    )
-
+# ============================================================
+# 4. 히스토그램  ← 상자그림 블록 삭제, 이 블록으로 교체
+#    - st.columns([1, 1])의 오른쪽 컬럼에 환각유형 + 점수 선택 배치
+#    - x축: 10개 빈 / y축: 선택한 환각유형 전체표본수 대비 %
+#    - 상단: 총 표본수 표시
+# ============================================================
 elif menu == "히스토그램":
-    import plotly.graph_objects as go
-    import numpy as np
-
     st.markdown("### 히스토그램 분석")
 
-    # ── 사이드바: 환각유형 + 분석 점수 선택 ──
-    with st.sidebar:
+    # ── 좌우 2컬럼: 왼쪽=차트, 오른쪽=선택 (≥오른쪽 상단 배치) ──
+    col_chart, col_ctrl = st.columns([2, 1])
+
+    with col_ctrl:
         st.markdown("#### 분석 설정")
         sel_type = st.selectbox(
             "환각 유형",
@@ -493,7 +376,7 @@ elif menu == "히스토그램":
     # ── 데이터 필터링 ──
     subset = df[df["환각 유형"] == sel_type]
     y_vals = subset[sel_score].dropna()
-    total_n = len(subset)  # 선택된 환각유형의 전체 행수(NaN 포함)
+    total_n = len(subset)   # 선택된 환각유형의 전체 행수(NaN 포함)
 
     if len(y_vals) == 0:
         st.warning(
@@ -501,82 +384,86 @@ elif menu == "히스토그램":
         )
         st.stop()
 
-    # ── 표시용 점수 이름(score_labels가 있으면 사용, 없으면 컬럼명) ──
-    score_kr = score_labels.get(sel_score, sel_score) if "score_labels" in dir() else sel_score
+    # ── 표시용 점수 이름 ──
+    score_kr = score_labels.get(sel_score, sel_score)
 
-    # ── 정보 표시 (상단) ──
-    st.markdown(
-        f"**환각유형:** {sel_type}  |  **분석 점수:** {score_kr}  |  "
-        f"**총 표본수:** {total_n}행"
-    )
-
-    # ── 10개 빈 수동 계산 (y축: 전체표본수 대비 백분율 %) ──
-    counts, bin_edges = np.histogram(y_vals, bins=10)
-    pct = counts / total_n * 100          # 전체표본수(total_n) 기준 %
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-    fig = go.Figure()
-
-    fig.add_trace(
-        go.Bar(
-            x=bin_centers,
-            y=pct,
-            name=sel_score,
-            marker_color=type_color_map.get(sel_type, "#4c78a8"),
-            opacity=0.85,
-            hovertemplate=(
-                "점수 구간: %{x:.3f}<br>"
-                "비율: %{y:.2f}%<extra></extra>"
-            ),
+    # ── 상단 정보 (왼쪽 컬럼 상단에 표시) ──
+    with col_chart:
+        st.markdown(
+            f"**환각유형:** {sel_type}  |  **분석 점수:** {score_kr}  |  "
+            f"**총 표본수:** {total_n}행"
         )
-    )
 
-    # ── 축 범위/레이블 ──
-    x_min = float(y_vals.min())
-    x_max = float(y_vals.max())
+        # ── 10개 빈 수동 계산 (y축: 해당 환각유형 전체표본수 대비 백분율 %) ──
+        counts, bin_edges = np.histogram(y_vals, bins=10)
+        pct = counts / total_n * 100          # 전체표본수(total_n) 기준 %
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
-    fig.update_xaxes(
-        range=[x_min, x_max],
-        title_text=score_kr,
-        tickformat=".3f",
-    )
-    fig.update_yaxes(
-        title_text="비율(%)",
-        range=[0, max(100, pct.max() * 1.15)],
-    )
+        fig = go.Figure()
 
-    fig.update_layout(
-        title=(
-            f"히스토그램 — {sel_type} · {score_kr}<br>"
-            f"(총 표본수: {total_n}행 · 10개 빈 · y축: 해당 환각유형 전체표본수 대비 %)"
-        ),
-        height=420,
-        margin=dict(l=50, r=30, t=90, b=55),
-        bargap=0.12,
-    )
+        fig.add_trace(
+            go.Bar(
+                x=bin_centers,
+                y=pct,
+                name=sel_score,
+                marker_color=type_color_map.get(sel_type, "#4c78a8"),
+                opacity=0.85,
+                # hovertemplate의 %{x} / %{y}는 일반 문자열 리터럴이라
+                # 중괄호 이스케이프 불필요. f-string 개입 없음.
+                hovertemplate=(
+                    "점수 구간 중심: %{x:.3f}<br>"
+                    "비율: %{y:.2f}%<extra></extra>"
+                ),
+            )
+        )
 
-    st.plotly_chart(fig, use_container_width=True)
+        # ── 축 범위/레이블 ──
+        x_min = float(y_vals.min())
+        x_max = float(y_vals.max())
 
-    # ── 분포 요약 ──
-    st.markdown("### 분포 요약")
-    st.caption(
-        f"선택 환각유형 **{sel_type}**의 전체 표본수: **{total_n}행**  "
-        f"(점수 결측 제외: {len(y_vals)}행)"
-    )
-    st.caption(
-        f"평균 {y_vals.mean():.3f} · 중앙값 {y_vals.median():.3f} · "
-        f"표준편차 {y_vals.std():.3f} · 최소 {y_vals.min():.3f} · 최대 {y_vals.max():.3f}"
-    )
+        fig.update_xaxes(
+            range=[x_min, x_max],
+            title_text=score_kr,
+            tickformat=".3f",
+        )
+        fig.update_yaxes(
+            title_text="비율(%)",
+            range=[0, max(100, pct.max() * 1.15)],
+        )
 
-    # ── 유형별 표본수 요약표 ──
-    st.markdown("### 유형별 표본수")
-    type_counts = (
-        df["환각 유형"]
-        .value_counts()
-        .reindex(["Fabrication", "Contradiction", "Unrelated"], fill_value=0)
-        .reset_index()
-    )
-    type_counts.columns = ["환각유형", "표본수"]
-    type_counts["표본수"] = type_counts["표본수"].astype(int)
+        fig.update_layout(
+            title=(
+                f"히스토그램 — {sel_type} · {score_kr}<br>"
+                f"(총 표본수: {total_n}행 · 10개 빈 · "
+                f"y축: 해당 환각유형 전체표본수 대비 %)"
+            ),
+            height=420,
+            margin=dict(l=50, r=30, t=90, b=55),
+            bargap=0.12,
+        )
 
-    st.dataframe(type_counts, use_container_width=True, hide_index=True)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ── 분포 요약 ──
+        st.markdown("### 분포 요약")
+        st.caption(
+            f"선택 환각유형 **{sel_type}**의 전체 표본수: **{total_n}행**  "
+            f"(점수 결측 제외: {len(y_vals)}행)"
+        )
+        st.caption(
+            f"평균 {y_vals.mean():.3f} · 중앙값 {y_vals.median():.3f} · "
+            f"표준편차 {y_vals.std():.3f} · 최소 {y_vals.min():.3f} · 최대 {y_vals.max():.3f}"
+        )
+
+        # ── 유형별 표본수 요약표 ──
+        st.markdown("### 유형별 표본수")
+        type_counts = (
+            df["환각 유형"]
+            .value_counts()
+            .reindex(["Fabrication", "Contradiction", "Unrelated"], fill_value=0)
+            .reset_index()
+        )
+        type_counts.columns = ["환각유형", "표본수"]
+        type_counts["표본수"] = type_counts["표본수"].astype(int)
+
+        st.dataframe(type_counts, use_container_width=True, hide_index=True)
