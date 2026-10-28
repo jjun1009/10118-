@@ -468,7 +468,16 @@ elif menu == "히스토그램":
 elif menu == "상자그림":
     st.markdown("### 환각유형별·점수별 상자그림 (3 × 3)")
 
-    # ── 세션스테이트 초기화 (처음 실행 시) ──
+    # ── 복잡도 구간 컬럼: 다른 블록과 공유용(정의만 해두고 이번 그래프에선 미사용) ──
+    if "복잡도 구간" not in df.columns:
+        df["복잡도 구간"] = pd.cut(
+            df["복잡도 지수"],
+            bins=6,
+            labels=[f"복잡도 구간 {i+1}" for i in range(6)],
+            include_lowest=True,
+        )
+
+    # ── 세션스테이트 초기화 ──
     if "box_hallucination_type" not in st.session_state:
         st.session_state["box_hallucination_type"] = "전체"
     if "box_show_stats" not in st.session_state:
@@ -494,10 +503,10 @@ elif menu == "상자그림":
         st.session_state["box_hallucination_type"] = box_hallucination_type
 
         box_show_stats = st.checkbox(
-            "Q1·Q3·중앙값 표시 (데이터 점 포함)",
+            "Q1·Q3·중앙값·데이터 점·평균선 표시",
             value=True,
-            help="토글 ON: Q1·Q3·중앙값 + 데이터 점(모든 표본) + 평균선 표시. "
-                 "토글 OFF: Q1·Q3·중앙값 구조만 표시(데이터 점 숨김).",
+            help="ON: 상자(구조) + 모든 데이터 점 + 평균선 표시 / "
+                 "OFF: 상자(구조)만 표시 (데이터 점·평균선 숨김).",
             key="box_show_stats_checkbox",
         )
         st.session_state["box_show_stats"] = box_show_stats
@@ -507,16 +516,23 @@ elif menu == "상자그림":
     with info_box:
         c1, c2 = st.columns([1, 1])
         with c1:
-            st.markdown(
-                f"**선택 환각유형:** `{box_hallucination_type}`"
-            )
+            st.markdown(f"**선택 환각유형:** `{box_hallucination_type}`")
         with c2:
             st.markdown(
-                f"**통계 요소 표시:** "
-                f"{'ON (Q1·Q3·중앙값 + 데이터 점 + 평균선)' if box_show_stats else 'OFF (구조만)'}"
+                f"**표시 상태:** "
+                f"{'ON (구조 + 모든 데이터 점 + 평균선)' if box_show_stats else 'OFF (구조만)'}"
             )
 
-    # ── 점수 3종 정의 ──
+    # ── 표시 대상 데이터 ──
+    if box_hallucination_type == "전체":
+        df_plot = df.copy()
+        types_to_plot = ["Fabrication", "Contradiction", "Unrelated"]
+        n_rows = 3
+    else:
+        df_plot = df[df["환각 유형"] == box_hallucination_type].copy()
+        types_to_plot = [box_hallucination_type]
+        n_rows = 1
+
     score_cols = [
         "개체 일치 점수",
         "답변 관련성 점수",
@@ -528,47 +544,26 @@ elif menu == "상자그림":
         "문맥 충실도 점수",
     ]
 
-    # ── 환각유형 종류(전체일 때 사용) ──
-    hallucination_types = [
-        "Fabrication",
-        "Contradiction",
-        "Unrelated",
-    ]
-        # ── 복잡도 구간 컬럼 생성 (상자그림 자체) ──
-    # 이미 존재하면 그대로 사용, 없으면 그룹 기준으로 생성
-    if "복잡도 구간" not in df.columns:
-        default_bins = 6
-        df["복잡도 구간"] = pd.cut(
-            df["복잡도 지수"],
-            bins=default_bins,
-            labels=[f"복잡도 구간 {i+1}" for i in range(default_bins)],
-            include_lowest=True,
-        )
-
-    # ── 세션스테이트 초기화 (처음 실행 시) ──
-    if "box_hallucination_type" not in st.session_state:
-        st.session_state["box_hallucination_type"] = "전체"
-    if "box_show_stats" not in st.session_state:
-        st.session_state["box_show_stats"] = True
-
-    # ── 표시 대상 데이터 ──
-    if box_hallucination_type == "전체":
-        df_plot = df.copy()
-        types_to_plot = hallucination_types
-        n_rows = 3
-    else:
-        df_plot = df[df["환각 유형"] == box_hallucination_type].copy()
-        types_to_plot = [box_hallucination_type]
-        n_rows = 1
-
-    # y축 범위 통일을 위한 각 점수별 전체 데이터 기준 최소·최대
+    # y축 범위 통일: 각 점수별 전체 데이터 기준 최소·최대
     y_range_per_score = {}
     for sc in score_cols:
         y_min_s = max(df[sc].min() * 0.95, 0)
         y_max_s = df[sc].max() * 1.05
         y_range_per_score[sc] = (y_min_s, y_max_s)
 
-    # ── 3×3 서브플롯 생성 ──
+    # ── 통계 표시 모드 결정 ──
+    if box_show_stats:
+        boxmean_mode = "sd"          # 상자 + 평균선 + 표준편차 범위
+        boxpoints_mode = "all"       # 모든 데이터 점 표시 → 직사각형 상자에 점 분포 추가
+        jitter_val = 0.0             # 점 위치 고정(흔들림 없음)
+        pointpos_val = 0.0
+    else:
+        boxmean_mode = False         # 평균선 미표시
+        boxpoints_mode = "none"      # 데이터 점 숨김 → 상자 구조만 → 정확한 직사각형
+        jitter_val = 0.0
+        pointpos_val = 0.0
+
+    # ── 서브플롯: n_rows × 3 ──
     fig = make_subplots(
         rows=n_rows,
         cols=3,
@@ -579,21 +574,13 @@ elif menu == "상자그림":
         vertical_spacing=0.18,
     )
 
-    # 통계 표시 모드 결정
-    if box_show_stats:
-        boxmean_mode = "sd"          # 평균+표준편차 범위 표시
-        boxpoints_mode = "all"       # 모든 데이터 점 표시
-    else:
-        boxmean_mode = False          # 평균선 미표시
-        boxpoints_mode = "none"       # 데이터 점 숨김 (구조만)
-
     row_idx = 1
     for ht in types_to_plot:
         col_idx = 1
         for sc in score_cols:
             subset = df_plot[df_plot["환각 유형"] == ht]
             if len(subset) == 0:
-                # 데이터가 없으면 빈 trace 대신 공백 처리용 더미 추가
+                # 데이터 없을 때 빈 placeholder
                 fig.add_trace(
                     go.Scatter(
                         x=[],
@@ -608,23 +595,23 @@ elif menu == "상자그림":
             else:
                 fig.add_trace(
                     go.Box(
-                        x=subset["복잡도 구간"].astype(str),
+                        # 복잡도 구간 없이, 환각유형 1개당 상자 1개
+                        x=[ht],
                         y=subset[sc],
-                        name=f"{ht}",
+                        name=ht,
                         boxmean=boxmean_mode,
                         boxpoints=boxpoints_mode,
-                        jitter=0.3,
-                        pointpos=-1.8,
+                        jitter=jitter_val,
+                        pointpos=pointpos_val,
                         marker_color=(
                             "#1f77b4" if ht == "Fabrication"
                             else "#d62728" if ht == "Contradiction"
                             else "#2ca02c"
                         ),
                         hovertemplate=(
-                            f"점수: %{{y:.3f}}<br>"
-                            f"구간: %{{x}}<br>"
-                            f"환각유형: {ht}<br>"
-                            f"{sc}: %{{y:.3f}}<extra></extra>"
+                            "점수: %{y:.3f}<br>"
+                            "환각유형: " + ht + "<br>"
+                            + sc + ": %{y:.3f}<extra></extra>"
                         ),
                     ),
                     row=row_idx,
@@ -640,7 +627,7 @@ elif menu == "상자그림":
                     title_text="",
                 )
 
-                # x축 제목 제거(subplot_titles에 정보 포함)
+                # x축 라벨 제거 (환각유형은 hover/subplot_titles로 확인)
                 fig.update_xaxes(
                     title_text="",
                     row=row_idx,
@@ -650,8 +637,7 @@ elif menu == "상자그림":
             col_idx += 1
         row_idx += 1
 
-    # ── 레이아웃 마무리 ──
-    row_height = 280 if n_rows == 3 else 360
+    # ── 레이아웃 ──
     fig.update_layout(
         height=300 * n_rows + 80,
         width=1100,
@@ -676,7 +662,7 @@ elif menu == "상자그림":
     type_counts = (
         df_plot["환각 유형"]
         .value_counts()
-        .reindex(hallucination_types, fill_value=0)
+        .reindex(["Fabrication", "Contradiction", "Unrelated"], fill_value=0)
         .reset_index()
     )
     type_counts.columns = ["환각유형", "표본수"]
@@ -686,4 +672,4 @@ elif menu == "상자그림":
         type_counts,
         use_container_width=True,
         hide_index=True,
-    )    
+    )
