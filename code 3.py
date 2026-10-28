@@ -307,7 +307,7 @@ elif menu == "산점도":
         )
 
 elif menu == "히스토그램":
-    st.markdown("### 문장복잡도 지수 구간별 히스토그램 (환각 발생 행만)")
+    st.markdown("### 문장복잡도 지수 구간별 상자그림 (환각 발생 여부 전체)")
 
     col_left, col_right = st.columns([1, 1])
 
@@ -329,102 +329,136 @@ elif menu == "히스토그램":
             "표시할 속성",
             options=hist_y_options,
             index=0,
-            help="히스토그램으로 표시할 점수를 선택합니다. 환각 발생 행(Is_Hallucination=1)만 대상으로 합니다.",
+            help="상자그림으로 표시할 점수를 선택합니다. 환각 발생 여부(0, 1) 전체 행을 표시합니다.",
             key="hist_y_selectbox",
         )
 
-    with col_right:
-        complexity_bins_cut = pd.cut(
-            df["복잡도 지수"],
-            bins=complexity_bins,
-            labels=[f"복잡도 구간 {i+1}" for i in range(complexity_bins)],
+    # 복잡도 구간으로 나누기 (구간 라벨)
+    def assign_complexity_bins(series, bins):
+        return pd.cut(
+            series,
+            bins=bins,
+            labels=[f"복잡도 구간 {i+1}" for i in range(bins)],
             include_lowest=True,
         )
-        df["복잡도 구간"] = complexity_bins_cut
 
-        complexity_labels = complexity_bins_cut.cat.categories.tolist()
+    # 전체 데이터 복잡도 구간
+    df["복잡도 구간"] = assign_complexity_bins(df["복잡도 지수"], complexity_bins)
 
-        selected_complexity = st.selectbox(
-            "볼 복잡도 구간",
-            options=complexity_labels,
-            index=0,
-            help="히스토그램을 표시할 문장복잡도 구간을 선택합니다.",
-            key="complexity_interval_selectbox",
-        )
-
-    # 해당 구간 전체에서 환각 발생 여부가 1인 행만 필터
-    interval_all = df[df["복잡도 구간"] == selected_complexity]
-    interval_hallucinated = interval_all[interval_all["환각 발생 여부"] == 1].dropna(
-        subset=[hist_y_col]
-    )
-
-    total_in_interval = len(interval_all)
-    hallucinated_count = len(interval_hallucinated)
-
-    st.markdown(f"### {selected_complexity} — {hist_y_col} 분포 (환각 발생 행만, %)")
+    st.markdown(f"### {hist_y_col} — 복잡도 구간별 상자그림 (환각 여부 전체 행)")
 
     st.caption(
-        f"해당 구간 전체 행수: {total_in_interval}행 · "
-        f"환각 발생 행수: {hallucinated_count}행"
+        f"전체 행수: {len(df)}행 · "
+        f"환각 미발생(0): {(df['환각 발생 여부'] == 0).sum()}행 · "
+        f"환각 발생(1): {(df['환각 발생 여부'] == 1).sum()}행"
     )
 
-    if hallucinated_count == 0:
-        st.warning(
-            f"선택한 구간({selected_complexity})에 환각 발생 행(Is_Hallucination=1)이 없습니다."
-        )
-    else:
-        import numpy as np
+    fig_box = go.Figure()
 
-        x_vals = interval_hallucinated[hist_y_col].values
-        total = total_in_interval
-
-        counts, bin_edges = np.histogram(x_vals, bins=30)
-        percentages = counts / total * 100
-
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-        fig_hist = go.Figure()
-        fig_hist.add_trace(
-            go.Bar(
-                x=bin_centers,
-                y=percentages,
-                name=f"{hist_y_col} 분포",
-                marker_color="crimson",
-                opacity=0.75,
-                hovertemplate=(
-                    f"{hist_y_col}: %{{x:.3f}}<br>"
-                    "비율: %{{y:.2f}}%<br>"
-                    "도수: %{customdata}<extra></extra>"
-                ),
-                customdata=counts,
-                width=(bin_edges[1] - bin_edges[0]) * 0.9,
+    # 환각 발생 여부 == 1 (빨강)
+    df_hall = df[df["환각 발생 여부"] == 1]
+    for interval_label in df["복잡도 구간"].cat.categories:
+        subset = df_hall[df_hall["복잡도 구간"] == interval_label]
+        if len(subset) > 0:
+            fig_box.add_trace(
+                go.Box(
+                    name=str(interval_label),
+                    y=subset[hist_y_col],
+                    marker_color="crimson",
+                    boxpoints="outliers",
+                    jitter=0.3,
+                    pointpos=-1.8,
+                    hovertemplate=(
+                        f"{hist_y_col}: %{{y:.3f}}<br>"
+                        "구간: " + interval_label + "<br>"
+                        "환각 발생 여부: 1<extra></extra>"
+                    ),
+                )
             )
+
+    # 환각 발생 여부 == 0 (파랑)
+    df_nonhall = df[df["환각 발생 여부"] == 0]
+    for interval_label in df["복잡도 구간"].cat.categories:
+        subset = df_nonhall[df_nonhall["복잡도 구간"] == interval_label]
+        if len(subset) > 0:
+            fig_box.add_trace(
+                go.Box(
+                    name=str(interval_label),
+                    y=subset[hist_y_col],
+                    marker_color="steelblue",
+                    boxpoints="outliers",
+                    jitter=0.3,
+                    pointpos=-1.8,
+                    hovertemplate=(
+                        f"{hist_y_col}: %{{y:.3f}}<br>"
+                        "구간: " + interval_label + "<br>"
+                        "환각 발생 여부: 0<extra></extra>"
+                    ),
+                )
+            )
+
+    # y축 범위 계산
+    y_min = min(
+        df[hist_y_col].min() * 0.95,
+        0,
+    )
+    y_max = df[hist_y_col].max() * 1.05
+
+    fig_box.update_layout(
+        xaxis_title="복잡도 구간",
+        yaxis_title=hist_y_col,
+        template="plotly_white",
+        height=450,
+        boxmode="group",
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=1.05,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=10),
+        ),
+        yaxis_range=[y_min, y_max],
+    )
+
+    st.plotly_chart(fig_box, use_container_width=True)
+
+    st.subheader("📊 복잡도 구간·환각 여부별 통계")
+    grouped_stats = (
+        df.groupby(["복잡도 구간", "환각 발생 여부"], observed=True)[hist_y_col]
+        .agg(
+            행수=("count"),
+            평균=("mean"),
+            표준편차=("std"),
+            최소값=("min"),
+            중앙값=("median"),
+            최대값=("max"),
         )
+        .reset_index()
+    )
+    grouped_stats["행수"] = grouped_stats["행수"].astype(int)
+    for col_name in ["평균", "표준편차", "최소값", "중앙값", "최대값"]:
+        grouped_stats[col_name] = grouped_stats[col_name].round(4)
 
-        fig_hist.update_layout(
-            xaxis_title=hist_y_col,
-            yaxis_title=f"비율 (% of 전체 {total_in_interval}행)",
-            template="plotly_white",
-            height=450,
-            bargap=0.05,
-            yaxis_range=[0, max(percentages.max() * 1.2, 1)],
-        )
-
-        st.plotly_chart(fig_hist, use_container_width=True)
-
-        st.subheader("📊 환각 발생 행 기본 통계")
-        stats_data = {
-            "통계량": ["환각 행수", "평균", "표준편차", "최소값", "25%", "중앙값", "75%", "최대값"],
-            "값": [
-                hallucinated_count,
-                round(interval_hallucinated[hist_y_col].mean(), 4),
-                round(interval_hallucinated[hist_y_col].std(), 4),
-                round(interval_hallucinated[hist_y_col].min(), 4),
-                round(interval_hallucinated[hist_y_col].quantile(0.25), 4),
-                round(interval_hallucinated[hist_y_col].median(), 4),
-                round(interval_hallucinated[hist_y_col].quantile(0.75), 4),
-                round(interval_hallucinated[hist_y_col].max(), 4),
-            ]
+    grouped_stats = grouped_stats.rename(
+        columns={
+            "복잡도 구간": "복잡도 구간",
+            "환각 발생 여부": "환각 발생 여부",
+            "행수": "행수",
+            "평균": "평균",
+            "표준편차": "표준편차",
+            "최소값": "최소값",
+            "중앙값": "중앙값",
+            "최대값": "최대값",
         }
-        stats_df = pd.DataFrame(stats_data)
-        st.dataframe(stats_df, use_container_width=True, hide_index=True)
+    )
+    grouped_stats = grouped_stats.sort_values(
+        ["복잡도 구간", "환각 발생 여부"]
+    )
+
+    st.dataframe(
+        grouped_stats,
+        use_container_width=True,
+        hide_index=True,
+    )
