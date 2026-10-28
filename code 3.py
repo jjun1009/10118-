@@ -581,6 +581,12 @@ elif menu == "상자그림":
     else:
         box_pts = "none"       # 상자 구조만 (정확한 직사각형)
 
+    # ── 
+    # ── y축 범위: 점수별 전체 df 기준(메뉴 선택과 무관하게 서브플롯 간 통일) ──
+    y_range_per_score = {}
+    for sc in score_cols:
+        y_range_per_score[sc] = (df[sc].min(), df[sc].max())
+
     # ── 서브플롯 생성 ──
     fig = make_subplots(
         rows=n_rows,
@@ -600,14 +606,15 @@ elif menu == "상자그림":
             y_vals = subset[sc].dropna()
 
             if len(y_vals) == 0:
-                continue  # 데이터가 없으면 이 셀은 빈 상태로 둠
+                continue  # 데이터 없으면 이 셀은 빈 상태로 둠
 
             fig.add_trace(
                 go.Box(
+                    # 복잡도 구간 없이, 환각유형 1개당 상자 1개
                     x=[ht],
                     y=y_vals,
                     name=ht,
-                    boxpoints=box_pts,
+                    boxpoints="none",   # 변수 대신 literals: 상자 구조만(정확한 직사각형)
                     jitter=0.0,
                     pointpos=0.0,
                     marker_color=(
@@ -634,7 +641,7 @@ elif menu == "상자그림":
                 title_text="",
             )
 
-            # x축 라벨 제거 (환각유형은 subplot_titles / hover로 확인)
+            # x축 라벨 제거(환각유형은 subplot_titles / hover로 확인)
             fig.update_xaxes(
                 title_text="",
                 row=row_idx,
