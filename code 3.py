@@ -568,6 +568,20 @@ elif menu == "상자그림":
         pointpos_val = 0.0
 
     # ── 서브플롯 생성 ──
+        # ── y축 범위: 점수별 전체 데이터 기준(메뉴 선택과 무관하게 통일) ──
+    y_range_per_score = {}
+    for sc in score_cols:
+        y_min_all = df[sc].min()
+        y_max_all = df[sc].max()
+        y_range_per_score[sc] = (y_min_all, y_max_all)
+
+    # ── 통계 표시 모드 (상자 구조만 vs 상자 + 이상치 점) ──
+    if box_show_stats:
+        box_pts = "outliers"   # 상자 구조 + 이상치 점만 (상자가 가려지지 않음)
+    else:
+        box_pts = "none"       # 상자 구조만 (정확한 직사각형)
+
+    # ── 서브플롯 생성 ──
     fig = make_subplots(
         rows=n_rows,
         cols=3,
@@ -583,66 +597,38 @@ elif menu == "상자그림":
         col_idx = 1
         for sc in score_cols:
             subset = df_plot[df_plot["환각 유형"] == ht]
-            n_sub = len(subset)
+            y_vals = subset[sc].dropna()
 
-            if n_sub == 0:
-                # 데이터 없으면 빈 placeholder
-                fig.add_trace(
-                    go.Scatter(
-                        x=[],
-                        y=[],
-                        mode="lines",
-                        showlegend=False,
-                        hoverinfo="skip",
+            if len(y_vals) == 0:
+                continue  # 데이터가 없으면 이 셀은 빈 상태로 둠
+
+            fig.add_trace(
+                go.Box(
+                    x=[ht],
+                    y=y_vals,
+                    name=ht,
+                    boxpoints=box_pts,
+                    jitter=0.0,
+                    pointpos=0.0,
+                    marker_color=(
+                        "#1f77b4" if ht == "Fabrication"
+                        else "#d62728" if ht == "Contradiction"
+                        else "#2ca02c"
                     ),
-                    row=row_idx,
-                    col=col_idx,
-                )
-            else:
-                # NaN 제거(계산용이 아닌 렌더링용)
-                y_vals = subset[sc].dropna()
-                if len(y_vals) == 0:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=[],
-                            y=[],
-                            mode="lines",
-                            showlegend=False,
-                            hoverinfo="skip",
-                        ),
-                        row=row_idx,
-                        col=col_idx,
-                    )
-                else:
-                    fig.add_trace(
-                        go.Box(
-                            # 복잡도 구간 없이, 환각유형 1개당 상자 1개
-                            x=[ht],
-                            y=y_vals,
-                            name=ht,
-                            boxmean=boxmean_mode,
-                            boxpoints=boxpoints_mode,
-                            jitter=jitter_val,
-                            pointpos=pointpos_val,
-                            marker_color=(
-                                "#1f77b4" if ht == "Fabrication"
-                                else "#d62728" if ht == "Contradiction"
-                                else "#2ca02c"
-                            ),
-                            hovertemplate=(
-                                "점수: %{y:.3f}<br>"
-                                "환각유형: " + ht + "<br>"
-                                + sc + ": %{y:.3f}<extra></extra>"
-                            ),
-                        ),
-                        row=row_idx,
-                        col=col_idx,
-                    )
+                    hovertemplate=(
+                        "점수: %{y:.3f}<br>"
+                        "환각유형: " + ht + "<br>"
+                        + sc + ": %{y:.3f}<extra></extra>"
+                    ),
+                ),
+                row=row_idx,
+                col=col_idx,
+            )
 
             # y축 범위 통일
-            y_min_s, y_max_s = y_range_per_score[sc]
+            y_min_all, y_max_all = y_range_per_score[sc]
             fig.update_yaxes(
-                range=[y_min_s, y_max_s],
+                range=[y_min_all, y_max_all],
                 row=row_idx,
                 col=col_idx,
                 title_text="",
