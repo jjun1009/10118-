@@ -468,7 +468,7 @@ elif menu == "히스토그램":
 elif menu == "상자그림":
     st.markdown("### 환각유형별·점수별 상자그림 (3 × 3)")
 
-    # ── 복잡도 구간 컬럼: 다른 블록과 공유용(정의만 해두고 이번 그래프에선 미사용) ──
+    # ── 복잡도 구간 컬럼: 다른 블록과 공유용(이번 그래프에선 미사용) ──
     if "복잡도 구간" not in df.columns:
         df["복잡도 구간"] = pd.cut(
             df["복잡도 지수"],
@@ -490,7 +490,7 @@ elif menu == "상자그림":
         "Unrelated",
     ]
 
-    # ── 사이드바: 환각유형 선택 + 통계 표시 토글 ──
+    # ── 사이드바 ──
     with st.sidebar:
         st.markdown("#### 상자그림 설정")
         box_hallucination_type = st.selectbox(
@@ -505,13 +505,15 @@ elif menu == "상자그림":
         box_show_stats = st.checkbox(
             "Q1·Q3·중앙값·데이터 점·평균선 표시",
             value=True,
-            help="ON: 상자(구조) + 모든 데이터 점 + 평균선 표시 / "
-                 "OFF: 상자(구조)만 표시 (데이터 점·평균선 숨김).",
+            help=(
+                "ON: 상자 구조 + 중앙값 + 평균 마커 + 이상치 점 표시 / "
+                "OFF: 상자 구조만 표시 (평균 마커·이상치 점 숨김)."
+            ),
             key="box_show_stats_checkbox",
         )
         st.session_state["box_show_stats"] = box_show_stats
 
-    # ── 오른쪽 상단: 선택 정보 + 토글 상태 ──
+    # ── 오른쪽 상단 정보 ──
     info_box = st.container()
     with info_box:
         c1, c2 = st.columns([1, 1])
@@ -520,7 +522,7 @@ elif menu == "상자그림":
         with c2:
             st.markdown(
                 f"**표시 상태:** "
-                f"{'ON (구조 + 모든 데이터 점 + 평균선)' if box_show_stats else 'OFF (구조만)'}"
+                f"{'ON (상자 구조 + 평균 마커 + 이상치 점)' if box_show_stats else 'OFF (상자 구조만)'}"
             )
 
     # ── 표시 대상 데이터 ──
@@ -544,7 +546,7 @@ elif menu == "상자그림":
         "문맥 충실도 점수",
     ]
 
-    # y축 범위 통일: 각 점수별 전체 데이터 기준 최소·최대
+    # ── y축 범위 통일(점수별 전체 데이터 기준) ──
     y_range_per_score = {}
     for sc in score_cols:
         y_min_s = max(df[sc].min() * 0.95, 0)
@@ -553,17 +555,19 @@ elif menu == "상자그림":
 
     # ── 통계 표시 모드 결정 ──
     if box_show_stats:
-        boxmean_mode = "sd"          # 상자 + 평균선 + 표준편차 범위
-        boxpoints_mode = "all"       # 모든 데이터 점 표시 → 직사각형 상자에 점 분포 추가
-        jitter_val = 0.0             # 점 위치 고정(흔들림 없음)
+        # 상자 구조 + 중앙값 + 평균 마커 + 이상치 점 (평균선은 막대 형태로 안 나오게 True 사용)
+        boxmean_mode = True
+        boxpoints_mode = "outliers"
+        jitter_val = 0.0
         pointpos_val = 0.0
     else:
-        boxmean_mode = False         # 평균선 미표시
-        boxpoints_mode = "none"      # 데이터 점 숨김 → 상자 구조만 → 정확한 직사각형
+        # 상자 구조만 — 정확한 직사각형 상자
+        boxmean_mode = False
+        boxpoints_mode = "none"
         jitter_val = 0.0
         pointpos_val = 0.0
 
-    # ── 서브플롯: n_rows × 3 ──
+    # ── 서브플롯 생성 ──
     fig = make_subplots(
         rows=n_rows,
         cols=3,
@@ -579,8 +583,10 @@ elif menu == "상자그림":
         col_idx = 1
         for sc in score_cols:
             subset = df_plot[df_plot["환각 유형"] == ht]
-            if len(subset) == 0:
-                # 데이터 없을 때 빈 placeholder
+            n_sub = len(subset)
+
+            if n_sub == 0:
+                # 데이터 없으면 빈 placeholder
                 fig.add_trace(
                     go.Scatter(
                         x=[],
@@ -593,46 +599,61 @@ elif menu == "상자그림":
                     col=col_idx,
                 )
             else:
-                fig.add_trace(
-                    go.Box(
-                        # 복잡도 구간 없이, 환각유형 1개당 상자 1개
-                        x=[ht],
-                        y=subset[sc],
-                        name=ht,
-                        boxmean=boxmean_mode,
-                        boxpoints=boxpoints_mode,
-                        jitter=jitter_val,
-                        pointpos=pointpos_val,
-                        marker_color=(
-                            "#1f77b4" if ht == "Fabrication"
-                            else "#d62728" if ht == "Contradiction"
-                            else "#2ca02c"
+                # NaN 제거(계산용이 아닌 렌더링용)
+                y_vals = subset[sc].dropna()
+                if len(y_vals) == 0:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[],
+                            y=[],
+                            mode="lines",
+                            showlegend=False,
+                            hoverinfo="skip",
                         ),
-                        hovertemplate=(
-                            "점수: %{y:.3f}<br>"
-                            "환각유형: " + ht + "<br>"
-                            + sc + ": %{y:.3f}<extra></extra>"
+                        row=row_idx,
+                        col=col_idx,
+                    )
+                else:
+                    fig.add_trace(
+                        go.Box(
+                            # 복잡도 구간 없이, 환각유형 1개당 상자 1개
+                            x=[ht],
+                            y=y_vals,
+                            name=ht,
+                            boxmean=boxmean_mode,
+                            boxpoints=boxpoints_mode,
+                            jitter=jitter_val,
+                            pointpos=pointpos_val,
+                            marker_color=(
+                                "#1f77b4" if ht == "Fabrication"
+                                else "#d62728" if ht == "Contradiction"
+                                else "#2ca02c"
+                            ),
+                            hovertemplate=(
+                                "점수: %{y:.3f}<br>"
+                                "환각유형: " + ht + "<br>"
+                                + sc + ": %{y:.3f}<extra></extra>"
+                            ),
                         ),
-                    ),
-                    row=row_idx,
-                    col=col_idx,
-                )
+                        row=row_idx,
+                        col=col_idx,
+                    )
 
-                # y축 범위 통일
-                y_min_s, y_max_s = y_range_per_score[sc]
-                fig.update_yaxes(
-                    range=[y_min_s, y_max_s],
-                    row=row_idx,
-                    col=col_idx,
-                    title_text="",
-                )
+            # y축 범위 통일
+            y_min_s, y_max_s = y_range_per_score[sc]
+            fig.update_yaxes(
+                range=[y_min_s, y_max_s],
+                row=row_idx,
+                col=col_idx,
+                title_text="",
+            )
 
-                # x축 라벨 제거 (환각유형은 hover/subplot_titles로 확인)
-                fig.update_xaxes(
-                    title_text="",
-                    row=row_idx,
-                    col=col_idx,
-                )
+            # x축 라벨 제거 (환각유형은 subplot_titles / hover로 확인)
+            fig.update_xaxes(
+                title_text="",
+                row=row_idx,
+                col=col_idx,
+            )
 
             col_idx += 1
         row_idx += 1
@@ -654,7 +675,7 @@ elif menu == "상자그림":
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # ── 총 표본수 + 환각유형별 표본수 ──
+    # ── 표본수 요약 ──
     st.markdown("### 표본수 요약")
     total_n = len(df_plot)
     st.caption(f"**전체 표본수: {total_n}행**")
