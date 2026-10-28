@@ -86,7 +86,7 @@ if menu == "서론":
     4. 산점도 화면: y축 점수를 선택하고, 온도 구간을 전환하며 구간별 산점도를 확인합니다.
        필요하면 1000개 무작위 샘플링 토글로 데이터 양을 제한할 수 있습니다.
     5. 히스토그램 화면: 문장복잡도 구간 개수(5/6/7)를 선택하고,  
-       세 가지 점수 중 하나를 골라 특정 구간의 히스토그램 분포를 확인합니다.
+       환각이 발생한 행(Is_Hallucination=1)만 필터링하여 세 점수 중 하나의 분포를 퍼센트 비율로 확인합니다.
 
     ### 데이터
     - 원본 파일: `rag_hallucination.csv`
@@ -307,7 +307,7 @@ elif menu == "산점도":
         )
 
 elif menu == "히스토그램":
-    st.markdown("### 문장복잡도 지수 구간별 히스토그램")
+    st.markdown("### 문장복잡도 지수 구간별 히스토그램 (환각 발생 행만)")
 
     col_left, col_right = st.columns([1, 1])
 
@@ -329,7 +329,7 @@ elif menu == "히스토그램":
             "표시할 속성",
             options=hist_y_options,
             index=0,
-            help="히스토그램으로 표시할 점수를 선택합니다.",
+            help="히스토그램으로 표시할 점수를 선택합니다. 환각 발생 행(Is_Hallucination=1)만 대상으로 합니다.",
             key="hist_y_selectbox",
         )
 
@@ -352,54 +352,101 @@ elif menu == "히스토그램":
             key="complexity_interval_selectbox",
         )
 
-    st.markdown(f"### {selected_complexity} — {hist_y_col} 분포")
-
-    interval_df = df[df["복잡도 구간"] == selected_complexity].dropna(
+    # 해당 구간 전체에서 환각 발생 여부가 1인 행만 필터
+    interval_all = df[df["복잡도 구간"] == selected_complexity]
+    interval_hallucinated = interval_all[interval_all["환각 발생 여부"] == 1].dropna(
         subset=[hist_y_col]
     )
 
-    st.caption(f"행수: {len(interval_df)}행")
+    total_in_interval = len(interval_all)
+    hallucinated_count = len(interval_hallucinated)
 
-    if len(interval_df) == 0:
-        st.warning("선택한 구간에 데이터가 없습니다.")
+    st.markdown(f"### {selected_complexity} — {hist_y_col} 분포 (환각 발생 행만, %)")
+
+    st.caption(
+        f"해당 구간 전체 행수: {total_in_interval}행 · "
+        f"환각 발생 행수: {hallucinated_count}행"
+    )
+
+    if hallucinated_count == 0:
+        st.warning(
+            f"선택한 구간({selected_complexity})에 환각 발생 행(Is_Hallucination=1)이 없습니다."
+        )
     else:
+        # y축: 퍼센트 비율 (각 빈 도수 / 구간 전체 행수 * 100)
         fig_hist = go.Figure()
 
         fig_hist.add_trace(
             go.Histogram(
-                x=interval_df[hist_y_col],
+                x=interval_hallucinated[hist_y_col],
                 nbinsx=30,
-                marker_color="steelblue",
-                opacity=0.7,
+                marker_color="crimson",
+                opacity=0.75,
                 hovertemplate=(
                     f"{hist_y_col}: %{{x:.3f}}<br>"
-                    "도수: %{y}<extra></extra>"
+                    "비율: %{y:.2f}%<extra></extra>"
                 ),
+                histnorm="",
+            )
+        )
+
+        # 각 빈의 도수를 전체 구간 행수 대비 퍼센트로 변환하기 위해
+        # Histogram의 y값을 커스텀해야 함 — Histogram은 원시 도수를 반환하므로
+        # 별도의 트레이스로 퍼센트 막대를 그립니다.
+        # plotly go.Histogram은 직접 y를 퍼센트로 설정할 수 없으므로
+        # numpy로 직접 빈별 도수 계산 후 막대그래프로 표시
+
+        import numpy as np
+
+        x_vals = interval_hallucinated[hist_y_col].values
+        total = total_in_interval  # 분모는 해당 구간 전체 행수
+
+        counts, bin_edges = np.histogram(x_vals, bins=30)
+        percentages = counts / total * 100
+
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+        fig_hist = go.Figure()
+        fig_hist.add_trace(
+            go.Bar(
+                x=bin_centers,
+                y=percentages,
+                name=f"{hist_y_col} 분포",
+                marker_color="crimson",
+                opacity=0.75,
+                hovertemplate=(
+                    f"{hist_y_col}: %{x:.3f}<br>"
+                    "비율: %{y:.2f}%<br>"
+                    "도수: %{customdata}<extra></extra>"
+                ),
+                customdata=counts,
+                width=(bin_edges[1] - bin_edges[0]) * 0.9,
             )
         )
 
         fig_hist.update_layout(
             xaxis_title=hist_y_col,
-            yaxis_title="도수 (빈도)",
+            yaxis_title=f"비율 (% of 전체 {total_in_interval}행)",
             template="plotly_white",
             height=450,
-            bargap=0.1,
+            bargap=0.05,
+            yaxis_range=[0, max(percentages.max() * 1.2, 1)],
         )
 
         st.plotly_chart(fig_hist, use_container_width=True)
 
-        st.subheader("📊 기본 통계")
+        st.subheader("📊 환각 발생 행 기본 통계")
         stats_data = {
-            "통계량": ["행수", "평균", "표준편차", "최소값", "25%", "중앙값", "75%", "최대값"],
+            "통계량": ["환각 행수", "평균", "표준편차", "최소값", "25%", "중앙값", "75%", "최대값"],
             "값": [
-                len(interval_df),
-                round(interval_df[hist_y_col].mean(), 4),
-                round(interval_df[hist_y_col].std(), 4),
-                round(interval_df[hist_y_col].min(), 4),
-                round(interval_df[hist_y_col].quantile(0.25), 4),
-                round(interval_df[hist_y_col].median(), 4),
-                round(interval_df[hist_y_col].quantile(0.75), 4),
-                round(interval_df[hist_y_col].max(), 4),
+                hallucinated_count,
+                round(interval_hallucinated[hist_y_col].mean(), 4),
+                round(interval_hallucinated[hist_y_col].std(), 4),
+                round(interval_hallucinated[hist_y_col].min(), 4),
+                round(interval_hallucinated[hist_y_col].quantile(0.25), 4),
+                round(interval_hallucinated[hist_y_col].median(), 4),
+                round(interval_hallucinated[hist_y_col].quantile(0.75), 4),
+                round(interval_hallucinated[hist_y_col].max(), 4),
             ]
         }
         stats_df = pd.DataFrame(stats_data)
