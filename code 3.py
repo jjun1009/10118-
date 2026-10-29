@@ -27,7 +27,7 @@ if not os.path.exists(CSV_PATH):
         "Context_Response_Overlap_Ratio": np.round(np.random.uniform(0,1,n), 4),
         "Entity_Match_Score":        np.round(np.random.uniform(0,1,n), 4),
         "Sentence_Complexity_Index": np.round(np.random.uniform(0,1,n), 4),
-        "Subjectivity_Score":        np.random.uniform(0,1,n), 4),
+        "Subjectivity_Score":        np.round(np.random.uniform(0,1,n), 4),
         "Contradiction_Words_Count": np.random.randint(0, 10, n),
         "Answer_Relevance_Score":    np.round(np.random.uniform(0,1,n), 4),
         "Context_Faithfulness_Score":np.round(np.random.uniform(0,1,n), 4),
@@ -156,7 +156,7 @@ elif menu == "히트맵":
         if st.button("▶", key="hm_c_right"):
             _cycle(hm_colors, "hm_ci", 1)
 
-    n_cells    = st.session_state["hm_n"]
+    n_cells      = st.session_state["hm_n"]
     color_choice = hm_colors[st.session_state["hm_ci"]]
 
     if color_choice == "붉은색":
@@ -166,10 +166,10 @@ elif menu == "히트맵":
     else:
         colorscale = [[0, "#f0fdf4"], [0.5, "#4ade80"], [1, "#166534"]]
 
-    temp_col    = "온도 설정값"
-    sim_col     = "데이터베이스 유사도 점수"
-    n_total_all = len(df)
-    n_hall_total= int((df["환각 발생 여부"] == 1).sum())
+    temp_col     = "온도 설정값"
+    sim_col      = "데이터베이스 유사도 점수"
+    n_total_all  = len(df)
+    n_hall_total = int((df["환각 발생 여부"] == 1).sum())
 
     # ── 구간 경계: pd.cut(bins=n_cells) → 항상 정확히 n_cells 구간 ──
     bin_labels_t = [f"Bin {i+1}" for i in range(n_cells)]
@@ -383,7 +383,9 @@ elif menu == "막대그래프":
             go.Bar(
                 x=agg["_bin"],
                 y=agg["환각률(%)"],
-                text=agg["환각률(%)"].apply(lambda v: f"{v}%" if not np.isnan(v) else "—"),
+                text=agg["환각률(%)"].apply(
+                    lambda v: f"{v}%" if not np.isnan(v) else "—"
+                ),
                 textposition="outside",
                 marker_color="steelblue",
                 hovertemplate=(
