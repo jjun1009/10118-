@@ -83,12 +83,12 @@ type_color_map = {
 }
 
 # ──────────────────────────────────────────────
-# 1. 사이드바 메뉴
+# 1. 사이드바 메뉴  (서론 → 히트맵 → 막대그래프 → 히스토그램2 → 히스토그램1)
 # ──────────────────────────────────────────────
 st.sidebar.title("메뉴")
 menu = st.sidebar.radio(
     "이동",
-    ["서론", "막대그래프", "히트맵", "히스토그램", "히스토그램2"],
+    ["서론", "히트맵", "막대그래프", "히스토그램2", "히스토그램1"],
     key="menu_radio",
 )
 
@@ -104,118 +104,7 @@ if menu == "서론":
     st.write("서론 내용은 아직 준비 중입니다.")
 
 # ──────────────────────────────────────────────
-# 4. 막대그래프  (완전 교체)
-#    입력 토큰 수 / 복잡도 지수 — 각 8구간 → 구간별 환각률(%)
-# ──────────────────────────────────────────────
-elif menu == "막대그래프":
-    # ── 사이드바 오른쪽 상단: X축 속성 선택 ──
-    col_c1, col_c2 = st.columns([1, 1])
-    with col_c1:
-        x_attr = st.radio(
-            "X축 속성",
-            ["입력 토큰 수", "복잡도 지수", "둘 다 보기"],
-            horizontal=True,
-            key="bar_xattr_radio",
-        )
-
-    N_BINS = 8
-    HALL_COL = "환각 발생 여부"
-
-    def make_bar_graph(col_x, title_x):
-        """col_x: 숫자형 열 이름, title_x: 그래프 제목용 문자열"""
-        edges = np.quantile(df[col_x], np.linspace(0, 1, N_BINS + 1))
-        edges = np.unique(edges)
-        n_bins_actual = len(edges) - 1
-        labels = [f"Bin {i+1}" for i in range(n_bins_actual)]
-
-        df["_bin"] = pd.cut(df[col_x], bins=edges, labels=labels, include_lowest=True)
-
-        agg = (
-            df.groupby("_bin", observed=True)
-            .agg(
-                전체_행수=(HALL_COL, "count"),
-                환각_행수=(HALL_COL, lambda x: (x == 1).sum()),
-            )
-            .reset_index()
-        )
-        agg["환각률(%)"] = (agg["환각_행수"] / agg["전체_행수"] * 100).round(2)
-
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=agg["_bin"],
-                y=agg["환각률(%)"],
-                text=agg["환각률(%)"].apply(lambda v: f"{v}%"),
-                textposition="outside",
-                marker_color="steelblue",
-                hovertemplate=(
-                    "%{x}<br>"
-                    "환각률: %{y:.2f}%<br>"
-                    "전체 행수: %{customdata}행<extra></extra>"
-                ),
-                customdata=agg["전체_행수"].values,
-            )
-        )
-
-        fig.update_layout(
-            title=f"{title_x}  ·  구간별 환각 발생률 (%)  ·  8구간",
-            xaxis_title=title_x,
-            yaxis_title="환각 발생률 (%)",
-            yaxis_range=[0, max(100, agg["환각률(%)"].max() * 1.15)],
-            template="plotly_white",
-            height=420,
-            margin=dict(l=50, r=30, t=70, b=50),
-        )
-        return fig, edges, labels
-
-    if x_attr == "입력 토큰 수":
-        col_x = "입력 토큰 수"
-        title_x = "입력 토큰 수"
-        fig1, edges1, labels1 = make_bar_graph(col_x, title_x)
-        st.plotly_chart(fig1, use_container_width=True)
-
-        st.caption(f"■ {title_x} 구간 경계값 (8구간):")
-        for i in range(len(edges1) - 1):
-            st.caption(f"  Bin {i+1}:  [{float(edges1[i]):.2f}, {float(edges1[i+1]):.2f})")
-        st.caption(f"■ 전체 표본수: {len(df)}행  "
-                   f"(환각: {(df[HALL_COL]==1).sum()}행 / "
-                   f"비환각: {(df[HALL_COL]==0).sum()}행)")
-
-    elif x_attr == "복잡도 지수":
-        col_x = "복잡도 지수"
-        title_x = "복잡도 지수"
-        fig2, edges2, labels2 = make_bar_graph(col_x, title_x)
-        st.plotly_chart(fig2, use_container_width=True)
-
-        st.caption(f"■ {title_x} 구간 경계값 (8구간):")
-        for i in range(len(edges2) - 1):
-            st.caption(f"  Bin {i+1}:  [{float(edges2[i]):.4f}, {float(edges2[i+1]):.4f})")
-        st.caption(f"■ 전체 표본수: {len(df)}행  "
-                   f"(환각: {(df[HALL_COL]==1).sum()}행 / "
-                   f"비환각: {(df[HALL_COL]==0).sum()}행)")
-
-    else:  # 둘 다 보기
-        col1, col2 = st.columns(2)
-        with col1:
-            fig1, edges1, _ = make_bar_graph("입력 토큰 수", "입력 토큰 수")
-            st.plotly_chart(fig1, use_container_width=True)
-        with col2:
-            fig2, edges2, _ = make_bar_graph("복잡도 지수", "복잡도 지수")
-            st.plotly_chart(fig2, use_container_width=True)
-
-        st.markdown("#### 구간 경계값")
-        st.caption("■ 입력 토큰 수 (8구간)")
-        for i in range(len(edges1) - 1):
-            st.caption(f"  Bin {i+1}:  [{float(edges1[i]):.2f}, {float(edges1[i+1]):.2f})")
-        st.caption("■ 복잡도 지수 (8구간)")
-        for i in range(len(edges2) - 1):
-            st.caption(f"  Bin {i+1}:  [{float(edges2[i]):.4f}, {float(edges2[i+1]):.4f})")
-        st.caption(f"■ 전체 표본수: {len(df)}행  "
-                   f"(환각: {(df[HALL_COL]==1).sum()}행 / "
-                   f"비환각: {(df[HALL_COL]==0).sum()}행)")
-
-# ──────────────────────────────────────────────
-# 5. 히트맵  (유지)
+# 4. 히트맵  (유지)
 # ──────────────────────────────────────────────
 elif menu == "히트맵":
     col_c, col_g = st.columns([1, 1])
@@ -243,9 +132,9 @@ elif menu == "히트맵":
     else:
         colorscale = [[0, "#f0fdf4"], [0.5, "#4ade80"], [1, "#166534"]]
 
-    temp_col = "온도 설정값"
-    sim_col  = "데이터베이스 유사도 점수"
-    n_total_all = len(df)
+    temp_col     = "온도 설정값"
+    sim_col      = "데이터베이스 유사도 점수"
+    n_total_all  = len(df)
 
     p = np.linspace(0, 1, n_cells + 1)
     temp_edges = np.unique(np.quantile(df[temp_col], p))
@@ -322,68 +211,130 @@ elif menu == "히트맵":
                f"비환각: {(df['환각 발생 여부']==0).sum()}행)")
 
 # ──────────────────────────────────────────────
-# 6. 히스토그램 (원래 첫 번째 코드 — 유지)
+# 5. 막대그래프  (완전 교체 + 데이터베이스 유사도 점수 추가)
+#    X축 속성: 입력 토큰 수 / 복잡도 지수 / 데이터베이스 유사도 점수 / 둘 다 보기
+#    각 속성별 8구간 → 구간별 환각률(%)
 # ──────────────────────────────────────────────
-elif menu == "히스토그램":
-    col_sel, _ = st.columns([1, 5])
-    with col_sel:
-        group_choice = st.radio(
-            "그룹 선택",
-            ["0 (비환각)", "1 (환각)", "전체 비교 (6개 모두)"],
+elif menu == "막대그래프":
+    # ── 사이드바 오른쪽 상단: X축 속성 선택 ──
+    col_c1, col_c2 = st.columns([1, 1])
+    with col_c1:
+        x_attr = st.radio(
+            "X축 속성",
+            ["입력 토큰 수", "복잡도 지수",
+             "데이터베이스 유사도 점수", "둘 다 보기"],
             horizontal=True,
-            key="hist_group_radio",
-        )
-        attr_choice = st.radio(
-            "표시 속성",
-            score_cols,
-            horizontal=True,
-            key="hist_attr_radio",
+            key="bar_xattr_radio",
         )
 
-    n_total_0 = int((df["환각 발생 여부"] == 0).sum())
-    n_total_1 = int((df["환각 발생 여부"] == 1).sum())
+    N_BINS = 8
+    HALL_COL = "환각 발생 여부"
 
-    def make_hist(data, attr, group_label, n_total):
+    def make_bar_graph(col_x, title_x):
+        edges = np.quantile(df[col_x], np.linspace(0, 1, N_BINS + 1))
+        edges = np.unique(edges)
+        n_bins_actual = len(edges) - 1
+        labels = [f"Bin {i+1}" for i in range(n_bins_actual)]
+
+        df["_bin"] = pd.cut(df[col_x], bins=edges, labels=labels,
+                             include_lowest=True)
+
+        agg = (
+            df.groupby("_bin", observed=True)
+            .agg(
+                전체_행수=(HALL_COL, "count"),
+                환각_행수=(HALL_COL, lambda x: (x == 1).sum()),
+            )
+            .reset_index()
+        )
+        agg["환각률(%)"] = (agg["환각_행수"] / agg["전체_행수"] * 100).round(2)
+
         fig = go.Figure()
-        fig.add_trace(go.Histogram(
-            x=data[attr],
-            nbinsx=10,
-            histnorm="percent",
-            name=group_label,
-            marker_color="#4C78A8" if "0" in group_label else "#E45759",
-            opacity=0.85,
-            text=[f"n = {n_total}"] * len(data),
-            textposition="outside",
-        ))
-        fig.update_layout(
-            title=f"{group_label}  ·  {attr}  ·  n = {n_total}",
-            xaxis_title=attr,
-            yaxis_title="비율 (%)",
-            bargap=0.1,
-            margin=dict(l=40, r=20, t=50, b=40),
-            height=260,
-            showlegend=False,
+        fig.add_trace(
+            go.Bar(
+                x=agg["_bin"],
+                y=agg["환각률(%)"],
+                text=agg["환각률(%)"].apply(lambda v: f"{v}%"),
+                textposition="outside",
+                marker_color="steelblue",
+                hovertemplate=(
+                    "%{x}<br>"
+                    "환각률: %{y:.2f}%<br>"
+                    "전체 행수: %{customdata}행<extra></extra>"
+                ),
+                customdata=agg["전체_행수"].values,
+            )
         )
-        fig.update_xaxes(range=[0, 1], tickangle=0)
-        fig.update_yaxes(ticksuffix="%")
-        return fig
 
-    if group_choice == "전체 비교 (6개 모두)":
-        ph = [[st.empty() for _ in range(3)] for _ in range(2)]
-        for ci, attr in enumerate(score_cols):
-            g0 = df[df["환각 발생 여부"] == 0]
-            ph[0][ci].write(make_hist(g0, attr, "그룹 0 (비환각)", n_total_0))
-            g1 = df[df["환각 발생 여부"] == 1]
-            ph[1][ci].write(make_hist(g1, attr, "그룹 1 (환각)", n_total_1))
-    else:
-        grp = 0 if "0" in group_choice else 1
-        grp_label = "그룹 0 (비환각)" if grp == 0 else "그룹 1 (환각)"
-        n_total   = n_total_0 if grp == 0 else n_total_1
-        sub = df[df["환각 발생 여부"] == grp]
-        st.write(make_hist(sub, attr_choice, grp_label, n_total))
+        fig.update_layout(
+            title=f"{title_x}  ·  구간별 환각 발생률 (%)  ·  8구간",
+            xaxis_title=title_x,
+            yaxis_title="환각 발생률 (%)",
+            yaxis_range=[0, max(100, agg["환각률(%)"].max() * 1.15)],
+            template="plotly_white",
+            height=420,
+            margin=dict(l=50, r=30, t=70, b=50),
+        )
+        return fig, edges
+
+    if x_attr == "입력 토큰 수":
+        col_x = "입력 토큰 수"
+        title_x = "입력 토큰 수"
+        fig1, edges1 = make_bar_graph(col_x, title_x)
+        st.plotly_chart(fig1, use_container_width=True)
+        st.caption(f"■ {title_x} 구간 경계값 (8구간):")
+        for i in range(len(edges1) - 1):
+            st.caption(f"  Bin {i+1}:  [{float(edges1[i]):.2f}, {float(edges1[i+1]):.2f})")
+        st.caption(f"■ 전체 표본수: {len(df)}행  "
+                   f"(환각: {(df[HALL_COL]==1).sum()}행 / "
+                   f"비환각: {(df[HALL_COL]==0).sum()}행)")
+
+    elif x_attr == "복잡도 지수":
+        col_x = "복잡도 지수"
+        title_x = "복잡도 지수"
+        fig2, edges2 = make_bar_graph(col_x, title_x)
+        st.plotly_chart(fig2, use_container_width=True)
+        st.caption(f"■ {title_x} 구간 경계값 (8구간):")
+        for i in range(len(edges2) - 1):
+            st.caption(f"  Bin {i+1}:  [{float(edges2[i]):.4f}, {float(edges2[i+1]):.4f})")
+        st.caption(f"■ 전체 표본수: {len(df)}행  "
+                   f"(환각: {(df[HALL_COL]==1).sum()}행 / "
+                   f"비환각: {(df[HALL_COL]==0).sum()}행)")
+
+    elif x_attr == "데이터베이스 유사도 점수":
+        col_x = "데이터베이스 유사도 점수"
+        title_x = "데이터베이스 유사도 점수"
+        fig3, edges3 = make_bar_graph(col_x, title_x)
+        st.plotly_chart(fig3, use_container_width=True)
+        st.caption(f"■ {title_x} 구간 경계값 (8구간):")
+        for i in range(len(edges3) - 1):
+            st.caption(f"  Bin {i+1}:  [{float(edges3[i]):.4f}, {float(edges3[i+1]):.4f})")
+        st.caption(f"■ 전체 표본수: {len(df)}행  "
+                   f"(환각: {(df[HALL_COL]==1).sum()}행 / "
+                   f"비환각: {(df[HALL_COL]==0).sum()}행)")
+
+    else:  # 둘 다 보기
+        col1, col2 = st.columns(2)
+        with col1:
+            fig1, edges1 = make_bar_graph("입력 토큰 수", "입력 토큰 수")
+            st.plotly_chart(fig1, use_container_width=True)
+        with col2:
+            fig2, edges2 = make_bar_graph("복잡도 지수", "복잡도 지수")
+            st.plotly_chart(fig2, use_container_width=True)
+
+        st.markdown("#### 구간 경계값")
+        st.caption("■ 입력 토큰 수 (8구간)")
+        for i in range(len(edges1) - 1):
+            st.caption(f"  Bin {i+1}:  [{float(edges1[i]):.2f}, {float(edges1[i+1]):.2f})")
+        st.caption("■ 복잡도 지수 (8구간)")
+        for i in range(len(edges2) - 1):
+            st.caption(f"  Bin {i+1}:  [{float(edges2[i]):.4f}, {float(edges2[i+1]):.4f})")
+        st.caption(f"■ 전체 표본수: {len(df)}행  "
+                   f"(환각: {(df[HALL_COL]==1).sum()}행 / "
+                   f"비환각: {(df[HALL_COL]==0).sum()}행)")
 
 # ──────────────────────────────────────────────
-# 7. 히스토그램2 (문서 기반 — 유지)
+# 6. 히스토그램2  (문서 기반 — 메뉴 명칭: 히스토그램2)
 # ──────────────────────────────────────────────
 elif menu == "히스토그램2":
     st.markdown("### 히스토그램 분석")
@@ -481,3 +432,65 @@ elif menu == "히스토그램2":
         type_counts.columns = ["환각유형", "표본수"]
         type_counts["표본수"] = type_counts["표본수"].astype(int)
         st.dataframe(type_counts, use_container_width=True, hide_index=True)
+
+# ──────────────────────────────────────────────
+# 7. 히스토그램1  (원래 첫 번째 코드 — 메뉴 명칭: 히스토그램1)
+#    그룹 0/1 × 3속성 = 6개 히스토그램, 사이드바 그룹·속성 선택
+# ──────────────────────────────────────────────
+elif menu == "히스토그램1":
+    col_sel, _ = st.columns([1, 5])
+    with col_sel:
+        group_choice = st.radio(
+            "그룹 선택",
+            ["0 (비환각)", "1 (환각)", "전체 비교 (6개 모두)"],
+            horizontal=True,
+            key="hist1_group_radio",
+        )
+        attr_choice = st.radio(
+            "표시 속성",
+            score_cols,
+            horizontal=True,
+            key="hist1_attr_radio",
+        )
+
+    n_total_0 = int((df["환각 발생 여부"] == 0).sum())
+    n_total_1 = int((df["환각 발생 여부"] == 1).sum())
+
+    def make_hist(data, attr, group_label, n_total):
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(
+            x=data[attr],
+            nbinsx=10,
+            histnorm="percent",
+            name=group_label,
+            marker_color="#4C78A8" if "0" in group_label else "#E45759",
+            opacity=0.85,
+            text=[f"n = {n_total}"] * len(data),
+            textposition="outside",
+        ))
+        fig.update_layout(
+            title=f"{group_label}  ·  {attr}  ·  n = {n_total}",
+            xaxis_title=attr,
+            yaxis_title="비율 (%)",
+            bargap=0.1,
+            margin=dict(l=40, r=20, t=50, b=40),
+            height=260,
+            showlegend=False,
+        )
+        fig.update_xaxes(range=[0, 1], tickangle=0)
+        fig.update_yaxes(ticksuffix="%")
+        return fig
+
+    if group_choice == "전체 비교 (6개 모두)":
+        ph = [[st.empty() for _ in range(3)] for _ in range(2)]
+        for ci, attr in enumerate(score_cols):
+            g0 = df[df["환각 발생 여부"] == 0]
+            ph[0][ci].write(make_hist(g0, attr, "그룹 0 (비환각)", n_total_0))
+            g1 = df[df["환각 발생 여부"] == 1]
+            ph[1][ci].write(make_hist(g1, attr, "그룹 1 (환각)", n_total_1))
+    else:
+        grp = 0 if "0" in group_choice else 1
+        grp_label = "그룹 0 (비환각)" if grp == 0 else "그룹 1 (환각)"
+        n_total   = n_total_0 if grp == 0 else n_total_1
+        sub = df[df["환각 발생 여부"] == grp]
+        st.write(make_hist(sub, attr_choice, grp_label, n_total))
