@@ -83,14 +83,13 @@ type_color_map = {
 }
 
 # ──────────────────────────────────────────────
-# 공통 세션 상태 초기화 헬퍼
+# 세션 상태 헬퍼
 # ──────────────────────────────────────────────
 def _init_session(key, default):
     if key not in st.session_state:
         st.session_state[key] = default
 
 def _cycle(arr, key, delta):
-    """arr 내에서 key에 해당하는 인덱스를 delta 만큼 이동 (경계 순환)"""
     n = len(arr)
     cur = st.session_state[key]
     nxt = (cur + delta) % n
@@ -98,7 +97,6 @@ def _cycle(arr, key, delta):
     return arr[nxt]
 
 def _cycle_int(min_val, max_val, key, delta):
-    """min~max 정수 순환"""
     cur = st.session_state[key]
     nxt = cur + delta
     if nxt < min_val:
@@ -109,7 +107,7 @@ def _cycle_int(min_val, max_val, key, delta):
     return nxt
 
 # ──────────────────────────────────────────────
-# 1. 사이드바 메뉴  (서론 → 히트맵 → 막대그래프 → 히스토그램1)
+# 1. 사이드바 메뉴
 # ──────────────────────────────────────────────
 st.sidebar.title("메뉴")
 menu = st.sidebar.radio(
@@ -132,23 +130,20 @@ if menu == "서론":
 # ──────────────────────────────────────────────
 # 4. 히트맵
 #    Y축(데이터베이스 유사도): 작은 값이 아래
-#    행렬수 5×5~15×15, 색상 선택, 축 양끝값 표시,
+#    행렬수 5×5 ~ 15×15, 색상 선택, 축 양끝값 표시,
 #    표본수 리스트, 결론칸
 # ──────────────────────────────────────────────
 elif menu == "히트맵":
-    # ── 사이드바 오른쪽 상단 컨트롤 ──
     col1, col2 = st.columns([1, 1])
 
     # (1) 행렬수 5×5 ~ 15×15  (화살표)
+    _init_session("hm_n", 6)
     with col1:
-        _init_session("hm_n", 6)
-        n_cells = _cycle_int(5, 15, "hm_n", 0)   # 현재 값 읽기 용
-        hm_prev = st.button("◀", key="hm_prev")
-        hm_next = st.button("▶", key="hm_next")
-        if hm_prev:
-            n_cells = _cycle_int(5, 15, "hm_n", -1)
-        if hm_next:
-            n_cells = _cycle_int(5, 15, "hm_n", 1)
+        if st.button("◀", key="hm_prev"):
+            _cycle_int(5, 15, "hm_n", -1)
+        if st.button("▶", key="hm_next"):
+            _cycle_int(5, 15, "hm_n", 1)
+        n_cells = st.session_state["hm_n"]
         st.caption(f"행렬수: {n_cells}×{n_cells}")
 
     # (2) 색상 선택 (화살표)
@@ -175,36 +170,38 @@ elif menu == "히트맵":
     n_total_all  = len(df)
     n_hall_total = int((df["환각 발생 여부"] == 1).sum())
 
+    # ── 구간 경계 계산 (실제 edge 수 기준으로 라벨 생성) ──
     p = np.linspace(0, 1, n_cells + 1)
-    temp_edges = np.unique(np.quantile(df[temp_col], p))
-    sim_edges  = np.unique(np.quantile(df[sim_col],  p))
-    n_temp_bins = len(temp_edges) - 1
-    n_sim_bins  = len(sim_edges)  - 1
+    raw_temp   = np.unique(np.quantile(df[temp_col], p))
+    raw_sim    = np.unique(np.quantile(df[sim_col],  p))
 
-    # 행렬 크기가 실제 구간 수보다 크면 맞춤
-    n_tb = max(n_temp_bins, n_cells)
-    n_sb = max(n_sim_bins,  n_cells)
+    # edge 양끝에 padding 추가해 실제 cut 범위 확보
+    temp_edges_full = np.sort(np.unique(np.concatenate([
+        [df[temp_col].min() - 1e-9],
+        raw_temp,
+        [df[temp_col].max() + 1e-9],
+    ])))
+    sim_edges_full  = np.sort(np.unique(np.concatenate([
+        [df[sim_col].min() - 1e-9],
+        raw_sim,
+        [df[sim_col].max() + 1e-9],
+    ])))
+
+    n_tb = len(temp_edges_full) - 1   # 실제 온도 구간 수
+    n_sb = len(sim_edges_full)  - 1   # 실제 유사도 구간 수
 
     bin_labels_t = [f"Bin {i+1}" for i in range(n_tb)]
     bin_labels_s = [f"Bin {i+1}" for i in range(n_sb)]
 
     df["temp_bin"] = pd.cut(
         df[temp_col],
-        bins=np.sort(np.unique(np.concatenate([
-            [df[temp_col].min() - 1e-9],
-            temp_edges,
-            [df[temp_col].max() + 1e-9],
-        ]))),
+        bins=temp_edges_full,
         labels=bin_labels_t,
         include_lowest=True,
     )
     df["sim_bin"] = pd.cut(
         df[sim_col],
-        bins=np.sort(np.unique(np.concatenate([
-            [df[sim_col].min() - 1e-9],
-            sim_edges,
-            [df[sim_col].max() + 1e-9],
-        ]))),
+        bins=sim_edges_full,
         labels=bin_labels_s,
         include_lowest=True,
     )
@@ -228,29 +225,30 @@ elif menu == "히트맵":
         values="전체_행수", fill_value=0,
     ).reindex(index=bin_labels_s, columns=bin_labels_t, fill_value=0)
 
+    # 축 양끝값
+    temp_lo = float(raw_temp[0]) if len(raw_temp) else float(df[temp_col].min())
+    temp_hi = float(raw_temp[-1]) if len(raw_temp) else float(df[temp_col].max())
+    sim_lo  = float(raw_sim[0])  if len(raw_sim)  else float(df[sim_col].min())
+    sim_hi  = float(raw_sim[-1]) if len(raw_sim)  else float(df[sim_col].max())
+
     fig_hm = go.Figure()
     fig_hm.add_trace(
         go.Heatmap(
             z=hm_data.values,
-            x=bin_labels_t,
-            y=bin_labels_s,
+            x=list(range(n_tb)),         # domain 좌표 0 ~ n_tb-1
+            y=list(range(n_sb)),
             colorscale=colorscale,
             zmin=0, zmax=100,
             colorbar=dict(title="환각률 (%)", thickness=15, len=0.8),
             hoverongaps=False,
             hovertemplate=(
-                "온도: %{x}<br>"
-                "유사도: %{y}<br>"
+                "온도 구간: %{x}<br>"
+                "유사도 구간: %{y}<br>"
                 "환각률: %{z:.1f}%<br>"
                 "<extra></extra>"
             ),
         )
     )
-
-    temp_lo = float(np.min(temp_edges))
-    temp_hi = float(np.max(temp_edges))
-    sim_lo  = float(np.min(sim_edges))
-    sim_hi  = float(np.max(sim_edges))
 
     fig_hm.update_layout(
         title=(
@@ -260,56 +258,61 @@ elif menu == "히트맵":
         ),
         xaxis_title=temp_col,
         yaxis_title=sim_col,
+        # X축: Bin 레이블, 양끝은 annotation 으로
         xaxis=dict(
             tickmode="array",
-            tickvals=bin_labels_t,
-            ticktext=[f" Bin {i+1}" for i in range(n_tb)],
-            range=[0, n_tb - 1],
-            annotation=dict(
-                x=0, y=-0.18,
-                text=f"최소: {temp_lo:.3f}",
-                showarrow=False, xanchor="left",
-                font=dict(size=11, color="gray"),
-            ),
+            tickvals=list(range(n_tb)),
+            ticktext=bin_labels_t,
+            showspikes=False,
         ),
+        # Y축: 작은 값이 아래 (autorange="reversed")
         yaxis=dict(
             tickmode="array",
-            tickvals=bin_labels_s,
-            ticktext=[f"Bin {i+1}" for i in range(n_sb)],
-            autorange="reversed",   # 작은 값이 아래
-            range=[0, n_sb - 1],
-            annotation=dict(
-                x=-0.12, y=0,
-                text=f"최소: {sim_lo:.4f}",
-                showarrow=False, yanchor="top",
-                font=dict(size=11, color="gray"),
-            ),
+            tickvals=list(range(n_sb)),
+            ticktext=bin_labels_s,
+            autorange="reversed",
+            showspikes=False,
         ),
         template="plotly_white",
         height=560,
         margin=dict(l=70, r=30, t=80, b=70),
     )
 
-    # 축 양끝값 메모 (레이아웃 annotation 으로도 표시)
+    # X축 양끝 값 annotation (domain 좌표 기준)
     fig_hm.add_annotation(
-        x=n_tb - 1, y=-0.18,
-        text=f"최대: {temp_hi:.3f}",
+        x=-0.08, y=0,
+        text=f"최소 {temp_lo:.3f}",
         showarrow=False, xanchor="right",
-        font=dict(size=11, color="gray"),
+        font=dict(size=10, color="gray"),
+        yref="paper", xref="paper",
     )
     fig_hm.add_annotation(
-        x=-0.12, y=n_sb - 1,
-        text=f"최대: {sim_hi:.4f}",
+        x=1.08, y=0,
+        text=f"최대 {temp_hi:.3f}",
+        showarrow=False, xanchor="left",
+        font=dict(size=10, color="gray"),
+        yref="paper", xref="paper",
+    )
+    # Y축 양끝 값 annotation
+    fig_hm.add_annotation(
+        x=0, y=1.08,
+        text=f"최소 {sim_lo:.4f}",
         showarrow=False, yanchor="bottom",
-        font=dict(size=11, color="gray"),
+        font=dict(size=10, color="gray"),
+        xref="paper", yref="paper",
+    )
+    fig_hm.add_annotation(
+        x=0, y=-0.08,
+        text=f"최대 {sim_hi:.4f}",
+        showarrow=False, yanchor="top",
+        font=dict(size=10, color="gray"),
+        xref="paper", yref="paper",
     )
 
     st.plotly_chart(fig_hm, use_container_width=True)
 
     # ── 결론칸 ──
-    st.markdown(
-        "#### 결론"
-    )
+    st.markdown("#### 결론")
     st.markdown(
         "> **데이터베이스와 유사할 수록 환각률이 낮고, 답변의 무작위성을 높게 설정할 수록 "
         "환각률이 높게 나타난다.**"
@@ -319,7 +322,6 @@ elif menu == "히트맵":
     st.markdown("#### 칸별 표본수")
     st.caption("※ 히트맵과 동일한 격자 구조이며, 각 셀에는 해당 범위 내 전체 행수를 표시합니다.")
 
-    # DataFrame 으로 표 형식 표시
     cnt_df = pd.DataFrame(cnt_data.values,
                           index=bin_labels_s,
                           columns=bin_labels_t)
@@ -340,7 +342,6 @@ elif menu == "히트맵":
 #    결론칸
 # ──────────────────────────────────────────────
 elif menu == "막대그래프":
-    # ── 사이드바 오른쪽 상단 컨트롤 ──
     col1, col2 = st.columns([1, 1])
 
     # (1) X축 속성 선택 — 버튼 하나로 압축 + 화살표
@@ -368,22 +369,23 @@ elif menu == "막대그래프":
         n_bins = st.session_state["bar_n"]
         st.caption(f"구간: {n_bins}개")
 
-    N_BINS  = n_bins
+    N_BINS   = n_bins
     HALL_COL = "환각 발생 여부"
 
     def make_bar_graph(col_x, title_x):
-        edges = np.quantile(df[col_x], np.linspace(0, 1, N_BINS + 1))
-        edges = np.unique(edges)
-        n_actual = len(edges) - 1
-        labels = [f"Bin {i+1}" for i in range(n_actual)]
+        # 실제 사용하는 edge 계산
+        raw_edges = np.unique(np.quantile(df[col_x], np.linspace(0, 1, N_BINS + 1)))
+        edges_full = np.sort(np.unique(np.concatenate([
+            [df[col_x].min() - 1e-9],
+            raw_edges,
+            [df[col_x].max() + 1e-9],
+        ])))
+        n_actual   = len(edges_full) - 1          # 실제 구간 수
+        labels     = [f"Bin {i+1}" for i in range(n_actual)]
 
         df["_bin"] = pd.cut(
             df[col_x],
-            bins=np.sort(np.unique(np.concatenate([
-                [df[col_x].min() - 1e-9],
-                edges,
-                [df[col_x].max() + 1e-9],
-            ]))),
+            bins=edges_full,
             labels=labels,
             include_lowest=True,
         )
@@ -397,8 +399,6 @@ elif menu == "막대그래프":
             .reset_index()
         )
         agg["환각률(%)"] = (agg["환각_행수"] / agg["전체_행수"] * 100).round(2)
-
-        n_actual = len(agg)
 
         fig = go.Figure()
         fig.add_trace(
@@ -426,7 +426,7 @@ elif menu == "막대그래프":
             height=420,
             margin=dict(l=50, r=30, t=70, b=50),
         )
-        return fig, edges, agg["전체_행수"].values
+        return fig, edges_full, raw_edges, agg["전체_행수"].values
 
     col_x   = {
         "입력 토큰 수":             "입력 토큰 수",
@@ -435,7 +435,7 @@ elif menu == "막대그래프":
     }[x_attr]
     title_x = x_attr
 
-    fig, edges, counts = make_bar_graph(col_x, title_x)
+    fig, edges_full, raw_edges, counts = make_bar_graph(col_x, title_x)
     st.plotly_chart(fig, use_container_width=True)
 
     # ── 결론칸 ──
@@ -448,9 +448,16 @@ elif menu == "막대그래프":
     # ── 구간 경계값 + 전체 표본수 ──
     st.markdown("#### 구간 경계값")
     st.caption(f"■ {title_x} 구간 경계값 ({N_BINS}구간):")
-    for i in range(len(edges) - 1):
-        fmt = ".4f" if "유사도" in title_x or "복잡도" in title_x else ".2f"
-        st.caption(f"  Bin {i+1}:  [{float(edges[i]):{fmt}}, {float(edges[i+1]):{fmt}})")
+    n_show = len(raw_edges) - 1
+    for i in range(n_show):
+        lo = float(raw_edges[i])
+        hi = float(raw_edges[i+1])
+        # 표시 형식 선택
+        if "유사도" in title_x or "복잡도" in title_x:
+            fmt = ".4f"
+        else:
+            fmt = ".2f"
+        st.caption(f"  Bin {i+1}:  [{lo:{fmt}}, {hi:{fmt}})")
     st.caption(f"■ 전체 표본수: {len(df)}행  "
                f"(환각: {(df[HALL_COL]==1).sum()}행 / "
                f"비환각: {(df[HALL_COL]==0).sum()}행)")
@@ -463,7 +470,6 @@ elif menu == "막대그래프":
 #    결론칸
 # ──────────────────────────────────────────────
 elif menu == "히스토그램1":
-    # ── 사이드바 오른쪽 상단 컨트롤 ──
     col1, col2 = st.columns([1, 1])
 
     # (1) 관찰할 속성 — 버튼 하나로 압축 + 화살표
@@ -476,7 +482,7 @@ elif menu == "히스토그램1":
         sel_attr = score_cols[st.session_state["hist1_attr_idx"]]
         st.caption(f"관찰 속성: {sel_attr}")
 
-    # (2) 그룹 선택 — 버튼 하나로 압축 + 화살표  (0/1 만, 전체삭제)
+    # (2) 그룹 선택 — 버튼 하나로 압축 + 화살표  (0/1 만)
     _init_session("hist1_grp_idx", 0)
     grp_options = ["0 (비환각)", "1 (환각)"]
     with col2:
