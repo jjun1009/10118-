@@ -62,6 +62,13 @@ RENAME_MAP = {
 df = df.rename(columns=RENAME_MAP)
 
 # ──────────────────────────────────────────────
+# 신규 열: 개체-문맥 (개체 일치 점수 − 문맥 충실도 점수의 절댓값)
+# ──────────────────────────────────────────────
+df["개체-문맥"] = (
+    (df["개체 일치 점수"] - df["문맥 충실도 점수"]).abs()
+)
+
+# ──────────────────────────────────────────────
 # 라벨 변수 정의
 # ──────────────────────────────────────────────
 score_cols = [
@@ -107,12 +114,12 @@ def _cycle_int(min_val, max_val, key, delta):
     return nxt
 
 # ──────────────────────────────────────────────
-# 1. 사이드바 메뉴
+# 1. 사이드바 메뉴  (서론 → 히트맵 → 상자그림 → 막대그래프 → 히스토그램1)
 # ──────────────────────────────────────────────
 st.sidebar.title("메뉴")
 menu = st.sidebar.radio(
     "이동",
-    ["서론", "히트맵", "막대그래프", "히스토그램1"],
+    ["서론", "히트맵", "상자그림", "막대그래프", "히스토그램1"],
     key="menu_radio",
 )
 
@@ -137,7 +144,6 @@ elif menu == "히트맵":
     _init_session("hm_n", 6)
     _init_session("hm_ci", 0)
 
-    # ── 컨트롤 한 줄 압축 ──
     c0, c1, c2, c3, c4, c5 = st.columns([1, 1.2, 1, 1, 1.5, 1])
     with c0:
         if st.button("◀", key="hm_n_left"):
@@ -171,7 +177,6 @@ elif menu == "히트맵":
     n_total_all  = len(df)
     n_hall_total = int((df["환각 발생 여부"] == 1).sum())
 
-    # ── 구간 경계: pd.cut(bins=n_cells) → 항상 정확히 n_cells 구간 ──
     bin_labels_t = [f"Bin {i+1}" for i in range(n_cells)]
     bin_labels_s = [f"Bin {i+1}" for i in range(n_cells)]
 
@@ -248,7 +253,7 @@ elif menu == "히트맵":
             tickmode="array",
             tickvals=list(range(n_cells)),
             ticktext=bin_labels_s,
-            autorange="reversed",   # 작은 값이 아래
+            autorange="reversed",
             showspikes=False,
         ),
         template="plotly_white",
@@ -256,7 +261,6 @@ elif menu == "히트맵":
         margin=dict(l=70, r=30, t=80, b=70),
     )
 
-    # ── 축 양끝값: 왼쪽 하단 0, X축 오른쪽 끝 x_max, Y축 아래쪽 끝 y_max ──
     fig_hm.add_annotation(
         x=-0.04, y=-0.10,
         text="0",
@@ -281,14 +285,12 @@ elif menu == "히트맵":
 
     st.plotly_chart(fig_hm, use_container_width=True)
 
-    # ── 결론칸 ──
     st.markdown("#### 결론")
     st.markdown(
         "> **데이터베이스와 유사할 수록 환각률이 낮고, 답변의 무작위성을 높게 설정할 수록 "
         "환각률이 높게 나타난다.**"
     )
 
-    # ── 표본수 리스트 ──
     st.markdown("#### 칸별 표본수")
     st.caption("※ 히트맵과 동일한 격자 구조이며, 각 셀에는 해당 범위 내 전체 행수를 표시합니다.")
 
@@ -300,13 +302,99 @@ elif menu == "히트맵":
     st.caption(f"※ 전체 표본수: {n_total_all}행  "
                f"(환각: {n_hall_total}행 / 비환각: {n_total_all - n_hall_total}행)")
 
-    # ── 축 양끝값 텍스트 ──
     st.markdown("#### 축 양끝값")
     st.caption(f"■ 온도 설정값 (X축):  {x_min:.3f}  ~  {x_max:.3f}")
     st.caption(f"■ 데이터베이스 유사도 점수 (Y축, 아래=작은값):  {y_min:.4f}  ~  {y_max:.4f}")
 
 # ──────────────────────────────────────────────
-# 5. 막대그래프
+# 5. 상자그림  (신규)
+#    개체-문맥 열 전체 행 대상, 정확한 직사각형 상자
+# ──────────────────────────────────────────────
+elif menu == "상자그림":
+    BOX_COL = "개체-문맥"
+
+    col_ctrl, col_viz = st.columns([1, 2])
+
+    with col_ctrl:
+        st.markdown("#### 상자그림 설정")
+        show_mean = st.checkbox(
+            "평균 표시",
+            value=True,
+            help="상자 중앙에 평균값을 마름모로 표시합니다.",
+            key="box_show_mean",
+        )
+        box_color = st.selectbox(
+            "상자 색상",
+            ["#4C78A8", "#E45759", "#54A24B", "#72B7B2", "#EA4A4A"],
+            index=0,
+            key="box_color_select",
+        )
+
+    y_vals = df[BOX_COL].dropna()
+    n_total = len(y_vals)
+
+    fig_box = go.Figure()
+    fig_box.add_trace(
+        go.Box(
+            y=y_vals,
+            name=BOX_COL,
+            marker=dict(
+                color=box_color,
+                line=dict(color=box_color, width=1),
+            ),
+            fillcolor=box_color,
+            opacity=0.85,
+            boxmean=show_mean,
+            boxpoints=False,          # 이상치 점 미표시 → 직사각형 강조
+            width=0.4,                # 상자 폭 (정확한 직사각형 강조)
+            line=dict(width=2),
+        )
+    )
+
+    fig_box.update_layout(
+        title=(
+            f"상자그림 — {BOX_COL}  ·  전체 행수: {n_total}행"
+        ),
+        yaxis_title=BOX_COL,
+        xaxis_title="",
+        xaxis=dict(showticklabels=False),
+        template="plotly_white",
+        height=460,
+        margin=dict(l=50, r=30, t=70, b=50),
+        showlegend=False,
+    )
+
+    # 상자 통계 정보 (상자에 마우스를 대면 보이지만, 명확히 아래에 표시)
+    q1  = float(np.percentile(y_vals, 25))
+    med = float(np.percentile(y_vals, 50))
+    q3  = float(np.percentile(y_vals, 75))
+    iqr = q3 - q1
+    lo  = q1 - 1.5 * iqr
+    hi  = q3 + 1.5 * iqr
+
+    fig_box.add_annotation(
+        x=0, y=med,
+        text=f"중앙값: {med:.3f}",
+        showarrow=True,
+        arrowhead=2,
+        arrowsize=1,
+        arrowwidth=1,
+        arrowcolor=box_color,
+        ax=0, ay=-40,
+        font=dict(size=11, color=box_color),
+    )
+
+    st.plotly_chart(fig_box, use_container_width=True)
+
+    st.markdown("#### 분포 요약")
+    st.caption(f"■ 전체 표본수: {n_total}행")
+    st.caption(f"■ 최소값: {y_vals.min():.3f}  |  Q1: {q1:.3f}  |  "
+               f"중앙값: {med:.3f}  |  Q3: {q3:.3f}  |  최대값: {y_vals.max():.3f}")
+    st.caption(f"■ IQR: {iqr:.3f}  |  "
+               f"수염 하한: {lo:.3f}  |  수염 상한: {hi:.3f}")
+
+# ──────────────────────────────────────────────
+# 6. 막대그래프
 #    X축 속성 3택1 · 구간 개수 1~10 (한 줄 압축)
 #    결론칸
 # ──────────────────────────────────────────────
@@ -319,7 +407,6 @@ elif menu == "막대그래프":
     _init_session("bar_xidx", 0)
     _init_session("bar_n", 8)
 
-    # ── 컨트롤 한 줄 압축 ──
     c0, c1, c2, c3, c4, c5 = st.columns([1, 2, 1, 1, 1.5, 1])
     with c0:
         if st.button("◀", key="bar_x_left"):
@@ -411,14 +498,12 @@ elif menu == "막대그래프":
     fig, edges_full = make_bar_graph(col_x, title_x)
     st.plotly_chart(fig, use_container_width=True)
 
-    # ── 결론칸 ──
     st.markdown("#### 결론")
     st.markdown(
         "> **입력토큰수에 따라 환각률은 고르고, 문장복잡도에 따라서는 뚜렷한 결과가 보이지 않으며, "
         "데이터베이스유사도에 따라선 x축값이 증가함에 따라 환각률이 낮아지는 경향이 두드러진다.**"
     )
 
-    # ── 구간 경계값 + 전체 표본수 ──
     st.markdown("#### 구간 경계값")
     st.caption(f"■ {title_x} 구간 경계값 ({N_BINS}구간):")
     n_show = len(edges_full) - 1
@@ -435,7 +520,7 @@ elif menu == "막대그래프":
                f"비환각: {(df[HALL_COL]==0).sum()}행)")
 
 # ──────────────────────────────────────────────
-# 6. 히스토그램1
+# 7. 히스토그램1
 #    관찰할 속성 · 그룹 선택 각 버튼+화살표 압축 (한 줄)
 #    결론칸
 # ──────────────────────────────────────────────
@@ -444,7 +529,6 @@ elif menu == "히스토그램1":
     _init_session("hist1_grp_idx", 0)
     grp_options = ["0 (비환각)", "1 (환각)"]
 
-    # ── 컨트롤 한 줄 압축 ──
     c0, c1, c2, c3, c4, c5 = st.columns([1, 2.5, 1, 1, 2, 1])
     with c0:
         if st.button("◀", key="h1_attr_left"):
@@ -500,7 +584,6 @@ elif menu == "히스토그램1":
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # ── 결론칸 ──
     st.markdown("#### 결론")
     st.markdown(
         "> **환각여부가 0인 그룹과 비교했을때 환각여부가 1인 그룹에서 답변에서 제공된 "
