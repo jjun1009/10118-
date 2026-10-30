@@ -62,11 +62,11 @@ RENAME_MAP = {
 df = df.rename(columns=RENAME_MAP)
 
 # ──────────────────────────────────────────────
-# 신규 열: 개체-문맥 (개체 일치 점수 − 문맥 충실도 점수의 절댓값)
+# 신규 열: 차이 절댓값 3종
 # ──────────────────────────────────────────────
-df["개체-문맥"] = (
-    (df["개체 일치 점수"] - df["문맥 충실도 점수"]).abs()
-)
+df["개체-문맥"]              = (df["개체 일치 점수"] - df["문맥 충실도 점수"]).abs()
+df["개체-답변관련성"]        = (df["개체 일치 점수"] - df["답변 관련성 점수"]).abs()
+df["답변관련성-문맥충실도"]  = (df["답변 관련성 점수"] - df["문맥 충실도 점수"]).abs()
 
 # ──────────────────────────────────────────────
 # 라벨 변수 정의
@@ -87,6 +87,20 @@ type_color_map = {
     "Fabrication":   "#1f77b4",
     "Contradiction": "#d62728",
     "Unrelated":     "#2ca02c",
+}
+
+# ──────────────────────────────────────────────
+# 상자그림 대상 열 + 라벨
+# ──────────────────────────────────────────────
+BOX_COLS = [
+    "개체-문맥",
+    "개체-답변관련성",
+    "답변관련성-문맥충실도",
+]
+BOX_LABELS = {
+    "개체-문맥":              "개체-문맥 (개체 일치 점수 − 문맥 충실도 점수)",
+    "개체-답변관련성":        "개체-답변관련성 (개체 일치 점수 − 답변 관련성 점수)",
+    "답변관련성-문맥충실도":  "답변관련성-문맥충실도 (답변 관련성 점수 − 문맥 충실도 점수)",
 }
 
 # ──────────────────────────────────────────────
@@ -114,7 +128,7 @@ def _cycle_int(min_val, max_val, key, delta):
     return nxt
 
 # ──────────────────────────────────────────────
-# 1. 사이드바 메뉴  (서론 → 히트맵 → 상자그림 → 막대그래프 → 히스토그램1)
+# 1. 사이드바 메뉴
 # ──────────────────────────────────────────────
 st.sidebar.title("메뉴")
 menu = st.sidebar.radio(
@@ -136,8 +150,6 @@ if menu == "서론":
 
 # ──────────────────────────────────────────────
 # 4. 히트맵
-#    행렬수 5×5~15×15, 색상 선택 (한 줄 압축)
-#    Y축 작은 값이 아래, 빈 셀 NaN 처리, 축 양끝 수치만
 # ──────────────────────────────────────────────
 elif menu == "히트맵":
     hm_colors = ["붉은색", "푸른색", "초록색"]
@@ -307,16 +319,28 @@ elif menu == "히트맵":
     st.caption(f"■ 데이터베이스 유사도 점수 (Y축, 아래=작은값):  {y_min:.4f}  ~  {y_max:.4f}")
 
 # ──────────────────────────────────────────────
-# 5. 상자그림  (신규)
-#    개체-문맥 열 전체 행 대상, 정확한 직사각형 상자
+# 5. 상자그림  (3열 선택 방식, 폭 축소·세로 확장)
 # ──────────────────────────────────────────────
 elif menu == "상자그림":
-    BOX_COL = "개체-문맥"
+    _init_session("box_col_idx", 0)
+    BOX_COL = BOX_COLS[st.session_state["box_col_idx"]]
 
     col_ctrl, col_viz = st.columns([1, 2])
 
     with col_ctrl:
         st.markdown("#### 상자그림 설정")
+
+        # ── 열 선택 (화살표 버튼 압축, 한 줄) ──
+        c0, c1, c2 = st.columns([1, 3, 1])
+        with c0:
+            if st.button("◀", key="box_col_left"):
+                _cycle(BOX_COLS, "box_col_idx", -1)
+        with c1:
+            st.caption(BOX_LABELS[BOX_COL])
+        with c2:
+            if st.button("▶", key="box_col_right"):
+                _cycle(BOX_COLS, "box_col_idx", 1)
+
         show_mean = st.checkbox(
             "평균 표시",
             value=True,
@@ -330,9 +354,10 @@ elif menu == "상자그림":
             key="box_color_select",
         )
 
-    y_vals = df[BOX_COL].dropna()
+    y_vals  = df[BOX_COL].dropna()
     n_total = len(y_vals)
 
+    # 세로 길게: height 크게, width 작게
     fig_box = go.Figure()
     fig_box.add_trace(
         go.Box(
@@ -345,26 +370,24 @@ elif menu == "상자그림":
             fillcolor=box_color,
             opacity=0.85,
             boxmean=show_mean,
-            boxpoints=False,          # 이상치 점 미표시 → 직사각형 강조
-            width=0.4,                # 상자 폭 (정확한 직사각형 강조)
+            boxpoints=False,     # 이상치 점 제거 → 직사각형 강조
+            width=0.15,          # 폭 축소 (기본 0.4 → 0.15)
             line=dict(width=2),
         )
     )
 
     fig_box.update_layout(
         title=(
-            f"상자그림 — {BOX_COL}  ·  전체 행수: {n_total}행"
+            f"상자그림 — {BOX_LABELS[BOX_COL]}  ·  전체 행수: {n_total}행"
         ),
         yaxis_title=BOX_COL,
-        xaxis_title="",
         xaxis=dict(showticklabels=False),
         template="plotly_white",
-        height=460,
+        height=620,            # 세로 길게
         margin=dict(l=50, r=30, t=70, b=50),
         showlegend=False,
     )
 
-    # 상자 통계 정보 (상자에 마우스를 대면 보이지만, 명확히 아래에 표시)
     q1  = float(np.percentile(y_vals, 25))
     med = float(np.percentile(y_vals, 50))
     q3  = float(np.percentile(y_vals, 75))
@@ -395,8 +418,6 @@ elif menu == "상자그림":
 
 # ──────────────────────────────────────────────
 # 6. 막대그래프
-#    X축 속성 3택1 · 구간 개수 1~10 (한 줄 압축)
-#    결론칸
 # ──────────────────────────────────────────────
 elif menu == "막대그래프":
     x_options_bar = [
@@ -521,8 +542,6 @@ elif menu == "막대그래프":
 
 # ──────────────────────────────────────────────
 # 7. 히스토그램1
-#    관찰할 속성 · 그룹 선택 각 버튼+화살표 압축 (한 줄)
-#    결론칸
 # ──────────────────────────────────────────────
 elif menu == "히스토그램1":
     _init_session("hist1_attr_idx", 0)
