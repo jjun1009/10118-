@@ -319,7 +319,7 @@ elif menu == "히트맵":
     st.caption(f"■ 데이터베이스 유사도 점수 (Y축, 아래=작은값):  {y_min:.4f}  ~  {y_max:.4f}")
 
 # ──────────────────────────────────────────────
-# 5. 상자그림  (3열 선택 방식, 폭 축소·세로 확장)
+# 5. 상자그림  (색상선택 제거, 이상치 표시, 폭 축소·세로 확장)
 # ──────────────────────────────────────────────
 elif menu == "상자그림":
     _init_session("box_col_idx", 0)
@@ -331,7 +331,7 @@ elif menu == "상자그림":
         st.markdown("#### 상자그림 설정")
 
         # ── 열 선택 (화살표 버튼 압축, 한 줄) ──
-        c0, c1, c2 = st.columns([1, 3, 1])
+        c0, c1, c2 = st.columns([1, 3.5, 1])
         with c0:
             if st.button("◀", key="box_col_left"):
                 _cycle(BOX_COLS, "box_col_idx", -1)
@@ -341,38 +341,34 @@ elif menu == "상자그림":
             if st.button("▶", key="box_col_right"):
                 _cycle(BOX_COLS, "box_col_idx", 1)
 
-        show_mean = st.checkbox(
-            "평균 표시",
+        # ── 이상치 표시 토글 (기본값: 표시) ──
+        show_outliers = st.checkbox(
+            "이상치 표시",
             value=True,
-            help="상자 중앙에 평균값을 마름모로 표시합니다.",
-            key="box_show_mean",
-        )
-        box_color = st.selectbox(
-            "상자 색상",
-            ["#4C78A8", "#E45759", "#54A24B", "#72B7B2", "#EA4A4A"],
-            index=0,
-            key="box_color_select",
+            help="상자 그림 바깥의 개별 이상치 점을 표시합니다.",
+            key="box_outliers_checkbox",
         )
 
     y_vals  = df[BOX_COL].dropna()
     n_total = len(y_vals)
 
-    # 세로 길게: height 크게, width 작게
+    # 폭 축소(width=0.06), 세로 확장(height=700)
     fig_box = go.Figure()
     fig_box.add_trace(
         go.Box(
             y=y_vals,
             name=BOX_COL,
             marker=dict(
-                color=box_color,
-                line=dict(color=box_color, width=1),
+                color="#4C78A8",          # 기본 색상 고정 (선택 제거)
+                size=6,
+                opacity=0.9,
             ),
-            fillcolor=box_color,
-            opacity=0.85,
-            boxmean=show_mean,
-            boxpoints=False,     # 이상치 점 제거 → 직사각형 강조
-            width=0.15,          # 폭 축소 (기본 0.4 → 0.15)
-            line=dict(width=2),
+            fillcolor="#4C78A8",
+            opacity=0.75,
+            boxmean=True,                 # 평균 마름모 표시
+            boxpoints="outliers" if show_outliers else False,
+            width=0.06,                   # 폭 대폭 축소 → 세로로 긴 직사각형
+            line=dict(width=2, color="#4C78A8"),
         )
     )
 
@@ -383,7 +379,7 @@ elif menu == "상자그림":
         yaxis_title=BOX_COL,
         xaxis=dict(showticklabels=False),
         template="plotly_white",
-        height=620,            # 세로 길게
+        height=700,           # 세로 확장 (기존 620 → 700)
         margin=dict(l=50, r=30, t=70, b=50),
         showlegend=False,
     )
@@ -394,6 +390,7 @@ elif menu == "상자그림":
     iqr = q3 - q1
     lo  = q1 - 1.5 * iqr
     hi  = q3 + 1.5 * iqr
+    n_outliers = int(((y_vals < lo) | (y_vals > hi)).sum())
 
     fig_box.add_annotation(
         x=0, y=med,
@@ -402,9 +399,9 @@ elif menu == "상자그림":
         arrowhead=2,
         arrowsize=1,
         arrowwidth=1,
-        arrowcolor=box_color,
+        arrowcolor="#4C78A8",
         ax=0, ay=-40,
-        font=dict(size=11, color=box_color),
+        font=dict(size=11, color="#4C78A8"),
     )
 
     st.plotly_chart(fig_box, use_container_width=True)
@@ -415,6 +412,8 @@ elif menu == "상자그림":
                f"중앙값: {med:.3f}  |  Q3: {q3:.3f}  |  최대값: {y_vals.max():.3f}")
     st.caption(f"■ IQR: {iqr:.3f}  |  "
                f"수염 하한: {lo:.3f}  |  수염 상한: {hi:.3f}")
+    st.caption(f"■ 이상치 개수: {n_outliers}개  "
+               f"({'표시' if show_outliers else '미표시'})")
 
 # ──────────────────────────────────────────────
 # 6. 막대그래프
