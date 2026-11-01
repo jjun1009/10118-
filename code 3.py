@@ -512,15 +512,15 @@ elif menu == "히트맵":
 
 
 # ============================================================
-# 7. 히스토그램1  (+ 겹침 보기: 정규화 후 3속성 겹침)
+# 7. 히스토그램1  (개별 보기 + 겹침 보기)
+#    겹침 보기: 세 속성 각각 [min, max] → [0, 1] 정규화 후 동일 축 겹침
 # ============================================================
 elif menu == "히스토그램1":
     _init_session("hist1_attr_idx", 0)
     _init_session("hist1_grp_idx", 0)
-    _init_session("hist1_overlay", False)   # ← 겹침 보기 토글
+    _init_session("hist1_overlay", False)
     grp_options = ["0 (비환각)", "1 (환각)"]
 
-    # ── 컨트롤: 속성 · 그룹 (기존) + 겹침 토글 (신규) ──
     c0, c1, c2, c3, c4, c5, c6 = st.columns([1, 2.5, 1, 1, 2, 1, 1.6])
     with c0:
         if st.button("◀", key="h1_attr_left"):
@@ -547,7 +547,6 @@ elif menu == "히스토그램1":
 
     overlay_mode = st.session_state["hist1_overlay"]
 
-    # 공통 값
     n_total_0 = int((df["환각 발생 여부"] == 0).sum())
     n_total_1 = int((df["환각 발생 여부"] == 1).sum())
 
@@ -564,14 +563,17 @@ elif menu == "히스토그램1":
 
         fig = go.Figure()
         fig.add_trace(go.Histogram(
-            x=sub[sel_attr],
+            x=sub[sel_attr].dropna().astype(float),
             nbinsx=10,
             histnorm="percent",
             name=grp_label,
             marker_color="#4C78A8" if grp == 0 else "#E45759",
             opacity=0.85,
-            text=[f"n = {n_total}"] * len(sub),
-            textposition="outside",
+            hovertemplate=(
+                "%{x:.3f}<br>"
+                "비율: %{y:.2f}%<br>"
+                "n = " + str(n_total) + "<extra></extra>"
+            ),
         ))
         fig.update_layout(
             title=f"{grp_label}  ·  {sel_attr}  ·  n = {n_total}",
@@ -601,7 +603,7 @@ elif menu == "히스토그램1":
         )
 
     else:
-        # ── 겹침 보기: 세 속성을 [0,1]로 정규화 후 동일 축에 겹침 ──
+        # ── 겹침 보기: 세 속성을 각각 [min, max] → [0, 1] 정규화 후 동일 축 겹침 ──
         sel_group = grp_options[st.session_state["hist1_grp_idx"]]
         grp       = 0 if "0" in sel_group else 1
         grp_label = "그룹 0 (비환각)" if grp == 0 else "그룹 1 (환각)"
@@ -609,76 +611,89 @@ elif menu == "히스토그램1":
 
         sub = df[df["환각 발생 여부"] == grp].copy()
 
-        # 정규화: 각 속성별 [min, max] → [0, 1]
-        norm_cols = {}
-        for col in score_cols:
-            vmin = float(sub[col].min())
-            vmax = float(sub[col].max())
-            if vmax - vmin > 1e-9:
-                sub[col + "_정규화"] = (sub[col] - vmin) / (vmax - vmin)
-            else:
-                sub[col + "_정규화"] = 0.0
-            norm_cols[col] = col + "_정규화"
+        # 빈 그룹 가드
+        if len(sub) == 0:
+            st.warning(
+                f"선택한 그룹 '{grp_label}'의 데이터가 없습니다. "
+                "다른 그룹을 선택하거나 개별 보기로 전환하세요."
+            )
+        else:
+            # 정규화: 각 속성별 [min, max] → [0, 1]
+            norm_cols = {}
+            for col in score_cols:
+                col_s = sub[col].dropna().astype(float)
+                vmin = float(col_s.min())
+                vmax = float(col_s.max())
+                if vmax - vmin > 1e-9:
+                    sub[col + "_정규화"] = (sub[col] - vmin) / (vmax - vmin)
+                else:
+                    sub[col + "_정규화"] = 0.0
+                norm_cols[col] = col + "_정규화"
 
-        COLORS = {
-            "개체 일치 점수":   "#4C78A8",
-            "답변 관련성 점수": "#E45759",
-            "문맥 충실도 점수": "#52B95E",
-        }
-        MARKERS = {
-            "개체 일치 점수":   "circle",
-            "답변 관련성 점수": "square",
-            "문맥 충실도 점수": "diamond",
-        }
+            COLORS = {
+                "개체 일치 점수":   "#4C78A8",
+                "답변 관련성 점수": "#E45759",
+                "문맥 충실도 점수": "#52B95E",
+            }
+            MARKERS = {
+                "개체 일치 점수":   "circle",
+                "답변 관련성 점수": "square",
+                "문맥 충실도 점수": "diamond",
+            }
 
-        fig = go.Figure()
-        for col in score_cols:
-            fig.add_trace(go.Histogram(
-                x=sub[norm_cols[col]],
-                nbinsx=10,
-                histnorm="percent",
-                name=col,
-                marker_color=COLORS[col],
-                marker_symbol=MARKERS[col],
-                opacity=0.75,
-                text=[f"n = {n_total}"] * len(sub),
-                textposition="outside",
-            ))
+            fig = go.Figure()
+            for col in score_cols:
+                x_vals = sub[norm_cols[col]].dropna().astype(float)
+                fig.add_trace(go.Histogram(
+                    x=x_vals,
+                    nbinsx=10,
+                    histnorm="percent",
+                    name=col,
+                    marker_color=COLORS[col],
+                    marker_symbol=MARKERS[col],
+                    opacity=0.75,
+                    hovertemplate=(
+                        "%{x:.3f}<br>"
+                        "비율: %{y:.2f}%<br>"
+                        "n = " + str(n_total) + "<extra></extra>"
+                    ),
+                ))
 
-        fig.update_layout(
-            title=(
-                f"{grp_label}  ·  세 속성 정규화 겹침  ·  "
-                f"n = {n_total}행  ·  (각 속성별 [min, max] → [0, 1])"
-            ),
-            xaxis_title="정규화 점수 (0 ~ 1)",
-            yaxis_title="비율 (%)",
-            bargap=0.05,
-            barmode="overlay",
-            margin=dict(l=50, r=20, t=60, b=50),
-            height=400,
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="center",
-                x=0.5,
-            ),
-        )
-        fig.update_xaxes(range=[0, 1], tickangle=0)
-        fig.update_yaxes(ticksuffix="%")
+            fig.update_layout(
+                title=(
+                    f"{grp_label}  ·  세 속성 정규화 겹침  ·  "
+                    f"n = {n_total}행  ·  (각 속성별 [min, max] → [0, 1])"
+                ),
+                xaxis_title="정규화 점수 (0 ~ 1)",
+                yaxis_title="비율 (%)",
+                bargap=0.05,
+                barmode="overlay",
+                margin=dict(l=50, r=20, t=60, b=50),
+                height=400,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5,
+                ),
+            )
+            fig.update_xaxes(range=[0, 1], tickangle=0)
+            fig.update_yaxes(ticksuffix="%")
 
-        st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("#### 결론")
-        st.markdown(
-            "> **세 속성을 각각 최솟값 0, 최댓값 1로 정규화하여 동일 축에 겹쳐 본 결과, "
-            "환각 그룹(1)과 비환각 그룹(0) 간에 세 속성의 분포 경향이 서로 다른 위치에서 "
-            "집중되는 양상을 확인할 수 있다.**"
-        )
+            st.markdown("#### 결론")
+            st.markdown(
+                "> **세 속성을 각각 최솟값 0, 최댓값 1로 정규화하여 동일 축에 "
+                "겹쳐 본 결과, 환각 그룹(1)과 비환각 그룹(0) 간에 "
+                "세 속성의 분포 경향이 서로 다른 위치에서 집중되는 양상을 "
+                "확인할 수 있다.**"
+            )
 
-        st.caption(
-            f"■ 선택된 그룹: {grp_label}  |  "
-            f"총 표본수: {n_total}행  |  "
-            f"표시: **세 속성 정규화 겹침** (각 속성별 [min, max] → [0, 1])"
-        )
+            st.caption(
+                f"■ 선택된 그룹: {grp_label}  |  "
+                f"총 표본수: {n_total}행  |  "
+                f"표시: **세 속성 정규화 겹침** (각 속성별 [min, max] → [0, 1])"
+            )
