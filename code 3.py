@@ -328,7 +328,7 @@ elif menu == "히트맵":
     st.caption(f"■ 데이터베이스 유사도 점수 (Y축, 아래=작은값):  {y_min:.4f}  ~  {y_max:.4f}")
 
 # ──────────────────────────────────────────────
-# 5. 막대그래프  (주관성 점수 구간 분할 오류 수정: 항상 N_BINS개 유지)
+# 5. 막대그래프  (구간 개수가 N_BINS와 일치하도록 make_bar_graph 수정)
 # ──────────────────────────────────────────────
 elif menu == "막대그래프":
     x_options_bar = [
@@ -372,25 +372,29 @@ elif menu == "막대그래프":
     title_x = x_attr
 
     def make_bar_graph(col_x, title_x):
-        # [수정] 주관성 점수 등에서 분위수 중복으로 Bin 개수가 N_BINS보다 적어지는 문제를 방지:
-        # 분위수 경계값을 만들 때 중복을 허용하지 않고, 중복 발생 시 미세 조정하여 항상 N_BINS개 구간을 유지.
+        # [수정] 구간 개수가 N_BINS와 일치하도록:
+        # 분위수 경계값의 중복을 미세 조정으로 해소하여 항상 N_BINS개 구간을 만든다.
+        data = df[col_x].dropna()
         qs = np.linspace(0, 1, N_BINS + 1)
-        edges = np.quantile(df[col_x], qs)
-        # 완전히 동일한 경계값이 반복될 경우, 미세 간격으로 벌려서 N_BINS+1개 경계를 확보
+        edges = np.quantile(data, qs)
+
+        # 첫 경계는 데이터의 최소값 이하, 마지막 경계는 최대값 이상이 되도록 보정
+        edges[0] = min(edges[0], data.min())
+        edges[-1] = max(edges[-1], data.max())
+
+        # 중복된 경계값을 미세 조정하여 엄격히 증가하도록 만든다
         for i in range(1, len(edges)):
             if edges[i] <= edges[i - 1]:
                 edges[i] = edges[i - 1] + 1e-9
-        edges_full = np.concatenate([
-            [df[col_x].min() - 1e-9],
-            edges,
-            [df[col_x].max() + 1e-9],
-        ])
 
-        n_actual = len(edges_full) - 1          # 항상 N_BINS (중복 조정 후)
-        labels   = [f"Bin {i+1}" for i in range(n_actual)]
+        # 마지막 경계 재확인 (조정 과정에서 최대값보다 작아질 수 있음)
+        if edges[-1] < data.max():
+            edges[-1] = data.max() + 1e-9
+
+        labels = [f"Bin {i+1}" for i in range(N_BINS)]
 
         df["_bin"] = pd.cut(
-            df[col_x], bins=edges_full,
+            df[col_x], bins=edges,
             labels=labels, include_lowest=True,
         )
 
@@ -436,9 +440,9 @@ elif menu == "막대그래프":
             height=420,
             margin=dict(l=50, r=30, t=70, b=50),
         )
-        return fig, edges_full
+        return fig, edges
 
-    fig, edges_full = make_bar_graph(col_x, title_x)
+    fig, edges = make_bar_graph(col_x, title_x)
     st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("#### 결론")
@@ -450,10 +454,10 @@ elif menu == "막대그래프":
 
     st.markdown("#### 구간 경계값")
     st.caption(f"■ {title_x} 구간 경계값 ({N_BINS}구간):")
-    n_show = len(edges_full) - 1
+    n_show = len(edges) - 1
     for i in range(n_show):
-        lo = float(edges_full[i])
-        hi = float(edges_full[i + 1])
+        lo = float(edges[i])
+        hi = float(edges[i + 1])
         if "유사도" in title_x or "복잡도" in title_x or "주관성" in title_x:
             fmt = ".4f"
         else:
