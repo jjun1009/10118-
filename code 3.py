@@ -465,10 +465,13 @@ elif menu == "막대그래프":
 # ──────────────────────────────────────────────
 # 6. 히스토그램1  (세 지표 함께 보기 버튼 추가)
 # ──────────────────────────────────────────────
+# ──────────────────────────────────────────────
+# 7. 히스토그램1  (세 지표 함께 보기 버튼 + 결론 수정)
+# ──────────────────────────────────────────────
 elif menu == "히스토그램1":
     _init_session("hist1_attr_idx", 0)
     _init_session("hist1_grp_idx", 0)
-    _init_session("hist1_three_view", False)   # 새 버튼 상태
+    _init_session("hist1_three_view", False)
     grp_options = ["0 (비환각)", "1 (환각)"]
 
     c0, c1, c2, c3, c4, c5, c6 = st.columns([1, 2.5, 1, 1, 2, 1, 1.5])
@@ -504,7 +507,6 @@ elif menu == "히스토그램1":
     n_total_1 = int((df["환각 발생 여부"] == 1).sum())
 
     if not three_view:
-        # ── 개별 보기 (기존 코드) ──
         sel_attr  = score_cols[st.session_state["hist1_attr_idx"]]
         sel_group = grp_options[st.session_state["hist1_grp_idx"]]
 
@@ -551,7 +553,7 @@ elif menu == "히스토그램1":
                    f"분석 속성: {sel_attr}")
 
     else:
-        # ── 세 지표 함께 보기: score_cols 3종을 색 구분 겹침 ──
+        # ── 세 지표 함께 보기 ──
         sel_group = grp_options[st.session_state["hist1_grp_idx"]]
         grp       = 0 if "0" in sel_group else 1
         grp_label = "그룹 0 (비환각)" if grp == 0 else "그룹 1 (환각)"
@@ -625,12 +627,10 @@ elif menu == "히스토그램1":
 
                 st.markdown("#### 결론")
                 st.markdown(
-                    "> **세 지표(개체 일치 점수·답변 관련성 점수·문맥 충실도 점수)를 "
-                    "하나의 차트에 색상 구분하여 겹쳐 본 결과, "
-                    "환각 그룹(1)과 비환각 그룹(0) 간에 세 지표의 분포 경향이 "
-                    "서로 다른 위치에서 집중되는 양상을 확인할 수 있다.**"
+                    "> **개체일치도, 문맥충실도, 답변관련성 순으로 "
+                    "환각이 일어날 경우 확연히 낮은 값의 분포를 띤다.**"
                 )
 
                 st.caption(f"■ 선택된 그룹: {grp_label}  |  "
                            f"총 표본수: {n_total}행  |  "
-                           f"표시: **세 지표 함께 보기** (개체 일치·답변 관련성·문맥 충실도)")
+                           f"표시: **세 지표 함께 보기** (개체일치도·문맥충실도·답변관련성)")
