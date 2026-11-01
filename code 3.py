@@ -122,12 +122,12 @@ def _cycle_int(min_val, max_val, key, delta):
 st.set_page_config(page_title="LLM 환각 분석", layout="wide")
 
 # ──────────────────────────────────────────────
-# 2. 사이드바 메뉴  (상자그림 삭제)
+# 2. 사이드바 메뉴  (서론 → 막대그래프 → 히트맵 → 히스토그램1)
 # ──────────────────────────────────────────────
 st.sidebar.title("메뉴")
 menu = st.sidebar.radio(
     "이동",
-    ["서론", "히트맵", "막대그래프", "히스토그램1"],
+    ["서론", "막대그래프", "히트맵", "히스토그램1"],
     key="menu_radio",
 )
 
@@ -172,6 +172,7 @@ if menu == "서론":
         "실제 실험이 아닌 합성 데이터이고 4개의 모델에 한정되어 있으므로 "
         "분석 결과를 보편적인 LLM으로 해석하지 마십시오."
     )
+    # 클릭 가능한 원본 링크
     st.markdown(
         "[원본 데이터셋 (HuggingFace)]"
         "(https://huggingface.co/datasets/vkshdev/rag-hallucination-benchmark/resolve/main/RAG_context_adherence_and_hallucination_benchmark.csv)"
@@ -205,7 +206,135 @@ if menu == "서론":
 
 
 # ============================================================
-# 5. 히트맵
+# 5. 막대그래프  (두 번째 메뉴로 이동)
+# ============================================================
+elif menu == "막대그래프":
+    x_options_bar = [
+        "입력 토큰 수",
+        "문장 복잡도 지수",
+        "데이터베이스 유사도 점수",
+    ]
+    _init_session("bar_xidx", 0)
+    _init_session("bar_n", 8)
+
+    c0, c1, c2, c3, c4, c5 = st.columns([1, 2, 1, 1, 1.5, 1])
+    with c0:
+        if st.button("◀", key="bar_x_left"):
+            _cycle(x_options_bar, "bar_xidx", -1)
+    with c1:
+        st.caption(x_options_bar[st.session_state["bar_xidx"]])
+    with c2:
+        if st.button("▶", key="bar_x_right"):
+            _cycle(x_options_bar, "bar_xidx", 1)
+    with c3:
+        if st.button("−", key="bar_n_minus"):
+            _cycle_int(1, 10, "bar_n", -1)
+    with c4:
+        st.caption(f"{st.session_state['bar_n']}개")
+    with c5:
+        if st.button("+", key="bar_n_plus"):
+            _cycle_int(1, 10, "bar_n", 1)
+
+    N_BINS   = st.session_state["bar_n"]
+    HALL_COL = "환각 발생 여부"
+    x_attr   = x_options_bar[st.session_state["bar_xidx"]]
+
+    col_x_map = {
+        "입력 토큰 수":             "입력 토큰 수",
+        "문장 복잡도 지수":         "문장 복잡도 지수",
+        "데이터베이스 유사도 점수": "데이터베이스 유사도 점수",
+    }
+    col_x   = col_x_map[x_attr]
+    title_x = x_attr
+
+    def make_bar_graph(col_x, title_x):
+        edges_full = np.sort(np.unique(np.concatenate([
+            [df[col_x].min() - 1e-9],
+            np.quantile(df[col_x], np.linspace(0, 1, N_BINS + 1)),
+            [df[col_x].max() + 1e-9],
+        ])))
+        n_actual = len(edges_full) - 1
+        labels    = [f"Bin {i+1}" for i in range(n_actual)]
+
+        df["_bin"] = pd.cut(
+            df[col_x], bins=edges_full,
+            labels=labels, include_lowest=True,
+        )
+
+        agg = (
+            df.groupby("_bin", observed=True)
+            .agg(
+                전체_행수=(HALL_COL, "count"),
+                환각_행수=(HALL_COL, lambda x: (x == 1).sum()),
+            )
+            .reset_index()
+        )
+        agg["환각률(%)"] = agg.apply(
+            lambda r: round(r["환각_행수"] / r["전체_행수"] * 100, 2)
+            if r["전체_행수"] > 0 else np.nan,
+            axis=1,
+        )
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=agg["_bin"].astype(str).tolist(),
+                y=agg["환각률(%)"].astype(float).tolist(),
+                text=agg["환각률(%)"].apply(
+                    lambda v: f"{v}%" if not np.isnan(v) else "—"
+                ).astype(str).tolist(),
+                textposition="outside",
+                marker_color="steelblue",
+                hovertemplate=(
+                    "%{x}<br>"
+                    "환각률: %{y:.2f}%<br>"
+                    "전체 행수: %{customdata}행<extra></extra>"
+                ),
+                customdata=agg["전체_행수"].astype(int).tolist(),
+            )
+        )
+
+        fig.update_layout(
+            title=f"{title_x}  ·  구간별 환각 발생률 (%)  ·  {N_BINS}구간",
+            xaxis_title=title_x,
+            yaxis_title="환각 발생률 (%)",
+            yaxis_range=[0, max(100, float(agg["환각률(%)"].max()) * 1.15)],
+            template="plotly_white",
+            height=420,
+            margin=dict(l=50, r=30, t=70, b=50),
+        )
+        return fig, edges_full
+
+    fig, edges_full = make_bar_graph(col_x, title_x)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("#### 결론")
+    st.markdown(
+        "> **입력토큰수에 따라 환각률은 고르고, 문장복잡도에 따라서는 뚜렷한 "
+        "결과가 보이지 않으며, 데이터베이스유사도에 따라선 x축값이 증가함에 따라 "
+        "환각률이 낮아지는 경향이 두드러진다.**"
+    )
+
+    st.markdown("#### 구간 경계값")
+    st.caption(f"■ {title_x} 구간 경계값 ({N_BINS}구간):")
+    n_show = len(edges_full) - 1
+    for i in range(n_show):
+        lo = float(edges_full[i])
+        hi = float(edges_full[i+1])
+        if "유사도" in title_x or "복잡도" in title_x:
+            fmt = ".4f"
+        else:
+            fmt = ".2f"
+        st.caption(f"  Bin {i+1}:  [{lo:{fmt}}, {hi:{fmt}})")
+    st.caption(
+        f"■ 전체 표본수: {len(df)}행  "
+        f"(환각: {(df[HALL_COL]==1).sum()}행 / "
+        f"비환각: {(df[HALL_COL]==0).sum()}행)"
+    )
+
+
+# ============================================================
+# 6. 히트맵  (세 번째 메뉴로 이동)
 # ============================================================
 elif menu == "히트맵":
     hm_colors = ["붉은색", "푸른색", "초록색"]
@@ -382,136 +511,7 @@ elif menu == "히트맵":
 
 
 # ============================================================
-# 6. 막대그래프
-# ============================================================
-elif menu == "막대그래프":
-    x_options_bar = [
-        "입력 토큰 수",
-        "문장 복잡도 지수",
-        "데이터베이스 유사도 점수",
-    ]
-    _init_session("bar_xidx", 0)
-    _init_session("bar_n", 8)
-
-    c0, c1, c2, c3, c4, c5 = st.columns([1, 2, 1, 1, 1.5, 1])
-    with c0:
-        if st.button("◀", key="bar_x_left"):
-            _cycle(x_options_bar, "bar_xidx", -1)
-    with c1:
-        st.caption(x_options_bar[st.session_state["bar_xidx"]])
-    with c2:
-        if st.button("▶", key="bar_x_right"):
-            _cycle(x_options_bar, "bar_xidx", 1)
-    with c3:
-        if st.button("−", key="bar_n_minus"):
-            _cycle_int(1, 10, "bar_n", -1)
-    with c4:
-        st.caption(f"{st.session_state['bar_n']}개")
-    with c5:
-        if st.button("+", key="bar_n_plus"):
-            _cycle_int(1, 10, "bar_n", 1)
-
-    N_BINS   = st.session_state["bar_n"]
-    HALL_COL = "환각 발생 여부"
-    x_attr   = x_options_bar[st.session_state["bar_xidx"]]
-
-    col_x_map = {
-        "입력 토큰 수":             "입력 토큰 수",
-        "문장 복잡도 지수":         "문장 복잡도 지수",
-        "데이터베이스 유사도 점수": "데이터베이스 유사도 점수",
-    }
-    col_x   = col_x_map[x_attr]
-    title_x = x_attr
-
-    def make_bar_graph(col_x, title_x):
-        edges_full = np.sort(np.unique(np.concatenate([
-            [df[col_x].min() - 1e-9],
-            np.quantile(df[col_x], np.linspace(0, 1, N_BINS + 1)),
-            [df[col_x].max() + 1e-9],
-        ])))
-        n_actual = len(edges_full) - 1
-        labels    = [f"Bin {i+1}" for i in range(n_actual)]
-
-        df["_bin"] = pd.cut(
-            df[col_x], bins=edges_full,
-            labels=labels, include_lowest=True,
-        )
-
-        agg = (
-            df.groupby("_bin", observed=True)
-            .agg(
-                전체_행수=(HALL_COL, "count"),
-                환각_행수=(HALL_COL, lambda x: (x == 1).sum()),
-            )
-            .reset_index()
-        )
-        agg["환각률(%)"] = agg.apply(
-            lambda r: round(r["환각_행수"] / r["전체_행수"] * 100, 2)
-            if r["전체_행수"] > 0 else np.nan,
-            axis=1,
-        )
-
-        # JSON 직렬화 호환: pandas/categorical → str / float / int
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=agg["_bin"].astype(str).tolist(),
-                y=agg["환각률(%)"].astype(float).tolist(),
-                text=agg["환각률(%)"].apply(
-                    lambda v: f"{v}%" if not np.isnan(v) else "—"
-                ).astype(str).tolist(),
-                textposition="outside",
-                marker_color="steelblue",
-                hovertemplate=(
-                    "%{x}<br>"
-                    "환각률: %{y:.2f}%<br>"
-                    "전체 행수: %{customdata}행<extra></extra>"
-                ),
-                customdata=agg["전체_행수"].astype(int).tolist(),
-            )
-        )
-
-        fig.update_layout(
-            title=f"{title_x}  ·  구간별 환각 발생률 (%)  ·  {N_BINS}구간",
-            xaxis_title=title_x,
-            yaxis_title="환각 발생률 (%)",
-            yaxis_range=[0, max(100, float(agg["환각률(%)"].max()) * 1.15)],
-            template="plotly_white",
-            height=420,
-            margin=dict(l=50, r=30, t=70, b=50),
-        )
-        return fig, edges_full
-
-    fig, edges_full = make_bar_graph(col_x, title_x)
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("#### 결론")
-    st.markdown(
-        "> **입력토큰수에 따라 환각률은 고르고, 문장복잡도에 따라서는 뚜렷한 "
-        "결과가 보이지 않으며, 데이터베이스유사도에 따라선 x축값이 증가함에 따라 "
-        "환각률이 낮아지는 경향이 두드러진다.**"
-    )
-
-    st.markdown("#### 구간 경계값")
-    st.caption(f"■ {title_x} 구간 경계값 ({N_BINS}구간):")
-    n_show = len(edges_full) - 1
-    for i in range(n_show):
-        lo = float(edges_full[i])
-        hi = float(edges_full[i+1])
-        if "유사도" in title_x or "복잡도" in title_x:
-            fmt = ".4f"
-        else:
-            fmt = ".2f"
-        st.caption(f"  Bin {i+1}:  [{lo:{fmt}}, {hi:{fmt}})")
-    st.caption(
-        f"■ 전체 표본수: {len(df)}행  "
-        f"(환각: {(df[HALL_COL]==1).sum()}행 / "
-        f"비환각: {(df[HALL_COL]==0).sum()}행)"
-    )
-
-
-# ============================================================
-# 7. 히스토그램1
+# 7. 히스토그램1  (네 번째 메뉴, 변경 없음)
 # ============================================================
 elif menu == "히스토그램1":
     _init_session("hist1_attr_idx", 0)
