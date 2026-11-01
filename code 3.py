@@ -97,10 +97,19 @@ menu = st.sidebar.selectbox(
 )
 
 # ============================================================
-# 1. 서론  (상자그림 삭제, 데이터 설명 추가)
+# 1. 서론  (상자그림 삭제, 데이터 설명, 분석대상표본수 추가)
 # ============================================================
 if menu == "서론":
     st.title("LLM의 환각 작용은 어떤 조건과 관련도가 높은가?")
+
+    # ── 분석대상표본수 ────────────────────────────────────────
+    total_n = len(df)
+    hall_n = int((df["환각 발생 여부"] == 1).sum())
+    non_hall_n = total_n - hall_n
+    st.markdown(
+        f"### 분석 대상 표본 수: **{total_n}행**  "
+        f"(환각: {hall_n}행 · 비환각: {non_hall_n}행)"
+    )
 
     st.markdown(
         """
@@ -141,7 +150,7 @@ if menu == "서론":
     )
 
     st.markdown(
-        "[원본 데이터셋 (HuggingFace)](https://huggingface.co/datasets/vkshdev/rag-hallucination-benchmark/resolve/main/RAG_context_adherence_and_hallucination_benchmark.csv)"
+        "[원본 데이터셋 (HuggingFace)](https://huggingface.co/datasets/vkshdev/rag-hallucination-benchmark?utm_source=chatgpt.com)"
     )
 
     st.markdown("---")
@@ -169,7 +178,6 @@ if menu == "서론":
     )
 
     st.markdown("---")
-    st.caption(f"분석 대상 표본 수: {len(df)}행")
 
 # ============================================================
 # 2. 히트맵
@@ -278,7 +286,7 @@ elif menu == "히트맵":
     c3.caption(f"Y축 아래쪽 끝: {y_max}")
 
 # ============================================================
-# 3. 막대그래프
+# 3. 막대그래프  (JSON 직렬화 오류 수정)
 # ============================================================
 elif menu == "막대그래프":
     st.title("LLM의 환각작용")
@@ -324,7 +332,6 @@ elif menu == "막대그래프":
             n_actual = 1
         bins = np.linspace(df[bar_x_col].min(), df[bar_x_col].max(), n_actual + 1)
         df["_bar_bin"] = pd.cut(df[bar_x_col], bins=bins, include_lowest=True)
-        labels = [f"구간 {i+1}" for i in range(n_actual)]
 
     agg = (
         df.groupby("_bar_bin", observed=True)
@@ -338,12 +345,17 @@ elif menu == "막대그래프":
 
     boundaries = sorted(set(df["_bar_bin"].dropna().cat.categories))
 
+    # ── JSON 직렬화 호환: 범주형 → 문자열, 실수 → float ──────
+    x_labels = [str(x) for x in agg["_bar_bin"]]
+    y_vals_bar = [float(y) for y in agg["환각률(%)"]]
+    text_vals = [f"{y:.2f}%" for y in agg["환각률(%)"]]
+
     fig_bar = go.Figure()
     fig_bar.add_trace(
         go.Bar(
-            x=agg["_bar_bin"],
-            y=agg["환각률(%)"],
-            text=agg["환각률(%)"].apply(lambda x: f"{x}%"),
+            x=x_labels,
+            y=y_vals_bar,
+            text=text_vals,
             textposition="outside",
             marker_color="steelblue",
             name=f"{bar_x_col} 구간별 환각률(%)",
@@ -352,7 +364,7 @@ elif menu == "막대그래프":
     fig_bar.update_layout(
         xaxis_title=bar_x_col,
         yaxis_title="환각 발생률 (%)",
-        yaxis_range=[0, max(agg["환각률(%)"].max() * 1.2, 10)],
+        yaxis_range=[0, max(max(y_vals_bar) * 1.2, 10)],
         template="plotly_white",
         height=500,
         bargap=0.25,
@@ -369,10 +381,8 @@ elif menu == "막대그래프":
     st.markdown("### 구간 경계값")
     st.caption(" | ".join([str(b) for b in boundaries]))
 
-    total_n = len(df)
-    hall_n = int((df["환각 발생 여부"] == 1).sum())
     st.markdown("### 전체 표본수")
-    st.caption(f"전체: {total_n}행 | 환각: {hall_n}행 | 비환각: {total_n - hall_n}행")
+    st.caption(f"전체: {total_n}행 | 환각: {hall_n}행 | 비환각: {non_hall_n}행")
 
 # ============================================================
 # 4. 히스토그램1
@@ -417,8 +427,8 @@ elif menu == "히스토그램1":
     fig_hist = go.Figure()
     fig_hist.add_trace(
         go.Bar(
-            x=bin_centers,
-            y=pct,
+            x=[float(c) for c in bin_centers],
+            y=[float(p) for p in pct],
             name=f"{score_kr} ({group_name})",
             marker_color="#4C78A8",
             opacity=0.85,
@@ -432,7 +442,7 @@ elif menu == "히스토그램1":
     x_min = float(subset.min())
     x_max = float(subset.max())
     fig_hist.update_xaxes(range=[x_min, x_max], title_text=score_kr, tickformat=".3f")
-    fig_hist.update_yaxes(title_text="비율(%)", range=[0, max(100, pct.max() * 1.15)])
+    fig_hist.update_yaxes(title_text="비율(%)", range=[0, max(100, float(pct.max()) * 1.15)])
 
     fig_hist.update_layout(
         title=f"히스토그램 — {score_kr} · {group_name} (n={group_n})<br>"
@@ -461,8 +471,7 @@ elif menu == "히스토그램1":
 
     st.markdown("### 전체 표본수")
     st.caption(
-        f"전체: {len(df)}행 | 환각(1): {int((df['환각 발생 여부'] == 1).sum())}행 | "
-        f"비환각(0): {int((df['환각 발생 여부'] == 0).sum())}행"
+        f"전체: {total_n}행 | 환각(1): {hall_n}행 | 비환각(0): {non_hall_n}행"
     )
 
 else:
