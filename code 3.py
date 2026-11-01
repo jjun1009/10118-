@@ -39,10 +39,12 @@ if not os.path.exists(CSV_PATH):
 
 df = pd.read_csv(CSV_PATH)
 
-# Subjectivity_Score, Context_Response_Overlap_Ratio는 막대그래프 x축 속성으로 사용하므로 유지
+# Context_Response_Overlap_Ratio는 모든 코드에서 삭제 (DROP_COLS에 포함)
 DROP_COLS = [
     "index", "Interaction_ID", "User_Prompt", "Provided_Context",
-    "LLM_Generated_Response", "Contradiction_Words_Count",
+    "LLM_Generated_Response",
+    "Context_Response_Overlap_Ratio",
+    "Contradiction_Words_Count",
 ]
 df = df.drop(columns=[c for c in DROP_COLS if c in df.columns])
 
@@ -55,7 +57,6 @@ RENAME_MAP = {
     "Entity_Match_Score":         "개체 일치 점수",
     "Sentence_Complexity_Index":  "문장 복잡도 지수",
     "Subjectivity_Score":         "주관성 점수",
-    "Context_Response_Overlap_Ratio": "문맥-답변 중복 비율",
     "Answer_Relevance_Score":     "답변 관련성 점수",
     "Context_Faithfulness_Score": "문맥 충실도 점수",
     "Hallucination_Type":         "환각 유형",
@@ -125,7 +126,7 @@ menu = st.sidebar.radio(
 st.title("LLM의 환각작용")
 
 # ──────────────────────────────────────────────
-# 3. 서론  (데이터 설명 + 문맥-답변 중복 비율 설명 추가)
+# 3. 서론  (문맥-답변 중복 비율 삭제, 데이터 설명에 미포함)
 # ──────────────────────────────────────────────
 if menu == "서론":
     st.title("서론")
@@ -147,7 +148,6 @@ if menu == "서론":
         "  - 답변 관련성 점수\n"
         "  - 문맥 충실도 점수\n"
         "  - 주관성 점수\n"
-        "  - 문맥-답변 중복 비율: 제공된 문맥과 답변 사이 텍스트 중복 비율\n"
         "  - 환각 발생 여부 (0: 비환각 / 1: 환각)\n"
         "- **주의사항**: 본 데이터는 합성 데이터이며 4개 모델에 한정되어 있으므로, "
         "이를 보편적 LLM의 환각 특성으로 해석해서는 안 됩니다."
@@ -155,7 +155,7 @@ if menu == "서론":
 
     st.header("작은 질문")
     st.markdown("""
-    - **막대그래프**: "입력 토큰 수, 문장 복잡도 지수, 주관성 점수, 문맥-답변 중복 비율을 구간별로 나눴을 때 환각 발생률은 어떻게 달라지는가?"
+    - **막대그래프**: "입력 토큰 수, 문장 복잡도 지수, 주관성 점수, 데이터베이스 유사도 점수를 구간별로 나눴을 때 환각 발생률은 어떻게 달라지는가?"
     - **히트맵**: "온도 설정값과 데이터베이스 유사도 점수를 각각 구간으로 나눴을 때, 두 조건이 교차하는 구간에서 환각률은 어떻게 나타나는가?"
     - **히스토그램1**: "환각 발생 여부(0/1)로 그룹을 나누었을 때, 개체 일치 점수·답변 관련성 점수·문맥 충실도 점수의 분포 형태는 어떻게 다른가?"
     """)
@@ -166,7 +166,7 @@ if menu == "서론":
                f"비환각: {(df['환각 발생 여부'] == 0).sum()}행)")
 
 # ──────────────────────────────────────────────
-# 4. 히트맵
+# 4. 히트맵  (이전 코드 그대로 유지)
 # ──────────────────────────────────────────────
 elif menu == "히트맵":
     hm_colors = ["붉은색", "푸른색", "초록색"]
@@ -336,14 +336,14 @@ elif menu == "히트맵":
     st.caption(f"■ 데이터베이스 유사도 점수 (Y축, 아래=작은값):  {y_min:.4f}  ~  {y_max:.4f}")
 
 # ──────────────────────────────────────────────
-# 5. 막대그래프  (x축 속성에 주관성 점수, 문맥-답변 중복 비율 추가)
+# 5. 막대그래프  (문맥-답변 중복 비율 삭제, DB 유사도 재추가)
 # ──────────────────────────────────────────────
 elif menu == "막대그래프":
     x_options_bar = [
         "입력 토큰 수",
         "문장 복잡도 지수",
         "주관성 점수",
-        "문맥-답변 중복 비율",
+        "데이터베이스 유사도 점수",
     ]
     _init_session("bar_xidx", 0)
     _init_session("bar_n", 8)
@@ -371,10 +371,10 @@ elif menu == "막대그래프":
     x_attr   = x_options_bar[st.session_state["bar_xidx"]]
 
     col_x_map = {
-        "입력 토큰 수":         "입력 토큰 수",
-        "문장 복잡도 지수":      "문장 복잡도 지수",
-        "주관성 점수":          "주관성 점수",
-        "문맥-답변 중복 비율":  "문맥-답변 중복 비율",
+        "입력 토큰 수":             "입력 토큰 수",
+        "문장 복잡도 지수":          "문장 복잡도 지수",
+        "주관성 점수":              "주관성 점수",
+        "데이터베이스 유사도 점수": "데이터베이스 유사도 점수",
     }
     col_x   = col_x_map[x_attr]
     title_x = x_attr
@@ -443,7 +443,8 @@ elif menu == "막대그래프":
     st.markdown("#### 결론")
     st.markdown(
         "> **입력토큰수에 따라 환각률은 고르고, 문장복잡도에 따라서는 뚜렷한 결과가 보이지 않으며, "
-        "주관성 점수와 문맥-답변 중복 비율에 따라서도 구간별 환각률 분포가 일정하게 나타난다.**"
+        "주관성 점수에 따라서도 구간별 환각률 분포가 일정하고, "
+        "데이터베이스유사도에 따라선 x축값이 증가함에 따라 환각률이 낮아지는 경향이 두드러진다.**"
     )
 
     st.markdown("#### 구간 경계값")
@@ -452,7 +453,7 @@ elif menu == "막대그래프":
     for i in range(n_show):
         lo = float(edges_full[i])
         hi = float(edges_full[i + 1])
-        if "유사도" in title_x or "복잡도" in title_x or "중복" in title_x or "주관성" in title_x:
+        if "유사도" in title_x or "복잡도" in title_x or "주관성" in title_x:
             fmt = ".4f"
         else:
             fmt = ".2f"
@@ -462,14 +463,15 @@ elif menu == "막대그래프":
                f"비환각: {(df[HALL_COL] == 0).sum()}행)")
 
 # ──────────────────────────────────────────────
-# 6. 히스토그램1  (겹침 코드 삭제 — 단순 히스토그램만 유지)
+# 6. 히스토그램1  (세 지표 함께 보기 버튼 추가)
 # ──────────────────────────────────────────────
 elif menu == "히스토그램1":
     _init_session("hist1_attr_idx", 0)
     _init_session("hist1_grp_idx", 0)
+    _init_session("hist1_three_view", False)   # 새 버튼 상태
     grp_options = ["0 (비환각)", "1 (환각)"]
 
-    c0, c1, c2, c3, c4, c5 = st.columns([1, 2.5, 1, 1, 2, 1])
+    c0, c1, c2, c3, c4, c5, c6 = st.columns([1, 2.5, 1, 1, 2, 1, 1.5])
     with c0:
         if st.button("◀", key="h1_attr_left"):
             _cycle(score_cols, "hist1_attr_idx", -1)
@@ -486,51 +488,149 @@ elif menu == "히스토그램1":
     with c5:
         if st.button("▶", key="h1_grp_right"):
             _cycle(grp_options, "hist1_grp_idx", 1)
+    with c6:
+        if st.button(
+            "세 지표 함께 보기" if not st.session_state["hist1_three_view"]
+            else "개별 보기",
+            key="h1_three_toggle",
+        ):
+            st.session_state["hist1_three_view"] = (
+                not st.session_state["hist1_three_view"]
+            )
 
-    sel_attr  = score_cols[st.session_state["hist1_attr_idx"]]
-    sel_group = grp_options[st.session_state["hist1_grp_idx"]]
+    three_view = st.session_state["hist1_three_view"]
 
     n_total_0 = int((df["환각 발생 여부"] == 0).sum())
     n_total_1 = int((df["환각 발생 여부"] == 1).sum())
 
-    grp       = 0 if "0" in sel_group else 1
-    grp_label = "그룹 0 (비환각)" if grp == 0 else "그룹 1 (환각)"
-    n_total   = n_total_0 if grp == 0 else n_total_1
+    if not three_view:
+        # ── 개별 보기 (기존 코드) ──
+        sel_attr  = score_cols[st.session_state["hist1_attr_idx"]]
+        sel_group = grp_options[st.session_state["hist1_grp_idx"]]
 
-    sub = df[df["환각 발생 여부"] == grp]
+        grp       = 0 if "0" in sel_group else 1
+        grp_label = "그룹 0 (비환각)" if grp == 0 else "그룹 1 (환각)"
+        n_total   = n_total_0 if grp == 0 else n_total_1
 
-    fig = go.Figure()
-    fig.add_trace(go.Histogram(
-        x=sub[sel_attr],
-        nbinsx=10,
-        histnorm="percent",
-        name=grp_label,
-        marker_color="#4C78A8" if grp == 0 else "#E45759",
-        opacity=0.85,
-        text=[f"n = {n_total}"] * len(sub),
-        textposition="outside",
-    ))
-    fig.update_layout(
-        title=f"{grp_label}  ·  {sel_attr}  ·  n = {n_total}",
-        xaxis_title=sel_attr,
-        yaxis_title="비율 (%)",
-        bargap=0.1,
-        margin=dict(l=40, r=20, t=50, b=40),
-        height=360,
-        showlegend=False,
-    )
-    fig.update_xaxes(range=[0, 1], tickangle=0)
-    fig.update_yaxes(ticksuffix="%")
+        sub = df[df["환각 발생 여부"] == grp]
 
-    st.plotly_chart(fig, use_container_width=True)
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(
+            x=sub[sel_attr].dropna().astype(float),
+            nbinsx=10,
+            histnorm="percent",
+            name=grp_label,
+            marker_color="#4C78A8" if grp == 0 else "#E45759",
+            opacity=0.85,
+            text=[f"n = {n_total}"] * len(sub),
+            textposition="outside",
+        ))
+        fig.update_layout(
+            title=f"{grp_label}  ·  {sel_attr}  ·  n = {n_total}",
+            xaxis_title=sel_attr,
+            yaxis_title="비율 (%)",
+            bargap=0.1,
+            margin=dict(l=40, r=20, t=50, b=40),
+            height=360,
+            showlegend=False,
+        )
+        fig.update_xaxes(range=[0, 1], tickangle=0)
+        fig.update_yaxes(ticksuffix="%")
 
-    st.markdown("#### 결론")
-    st.markdown(
-        "> **환각여부가 0인 그룹과 비교했을때 환각여부가 1인 그룹에서 답변에서 제공된 "
-        "문맥에서의 각 개체가 일치하는 정도, 답변이 질문과 관련되어 있는 정도, "
-        "답변이 제공된 문맥에 근거하는 정도가 전부 상대적으로 낮은 값에 분포하고 있다.**"
-    )
+        st.plotly_chart(fig, use_container_width=True)
 
-    st.caption(f"■ 선택된 그룹: {grp_label}  |  "
-               f"총 표본수: {n_total}행  |  "
-               f"분석 속성: {sel_attr}")
+        st.markdown("#### 결론")
+        st.markdown(
+            "> **환각여부가 0인 그룹과 비교했을때 환각여부가 1인 그룹에서 답변에서 제공된 "
+            "문맥에서의 각 개체가 일치하는 정도, 답변이 질문과 관련되어 있는 정도, "
+            "답변이 제공된 문맥에 근거하는 정도가 전부 상대적으로 낮은 값에 분포하고 있다.**"
+        )
+
+        st.caption(f"■ 선택된 그룹: {grp_label}  |  "
+                   f"총 표본수: {n_total}행  |  "
+                   f"분석 속성: {sel_attr}")
+
+    else:
+        # ── 세 지표 함께 보기: score_cols 3종을 색 구분 겹침 ──
+        sel_group = grp_options[st.session_state["hist1_grp_idx"]]
+        grp       = 0 if "0" in sel_group else 1
+        grp_label = "그룹 0 (비환각)" if grp == 0 else "그룹 1 (환각)"
+        n_total   = n_total_0 if grp == 0 else n_total_1
+
+        sub = df[df["환각 발생 여부"] == grp].copy()
+
+        if len(sub) == 0:
+            st.warning(
+                f"선택한 그룹 '{grp_label}'의 데이터가 없습니다. "
+                "다른 그룹을 선택하세요."
+            )
+        else:
+            COLORS = {
+                "개체 일치 점수":   "#4C78A8",
+                "답변 관련성 점수": "#E45759",
+                "문맥 충실도 점수": "#52B95E",
+            }
+
+            fig_three = go.Figure()
+            any_trace = False
+            for col in score_cols:
+                x_vals = sub[col].dropna().astype(float)
+                if len(x_vals) == 0:
+                    continue
+                fig_three.add_trace(go.Histogram(
+                    x=x_vals,
+                    nbinsx=10,
+                    histnorm="percent",
+                    name=col,
+                    marker_color=COLORS[col],
+                    opacity=0.75,
+                    hovertemplate=(
+                        "%{x:.3f}<br>"
+                        "비율: %{y:.2f}%<br>"
+                        "n = " + str(n_total) + "<extra></extra>"
+                    ),
+                ))
+                any_trace = True
+
+            if not any_trace:
+                st.warning(
+                    "선택한 그룹의 모든 속성이 비어 있어 차트를 표시할 수 없습니다. "
+                    "다른 그룹을 선택하세요."
+                )
+            else:
+                fig_three.update_layout(
+                    title=(
+                        f"{grp_label}  ·  세 지표 비교  ·  "
+                        f"n = {n_total}행"
+                    ),
+                    xaxis_title="점수 (0 ~ 1)",
+                    yaxis_title="비율 (%)",
+                    bargap=0.05,
+                    barmode="overlay",
+                    margin=dict(l=50, r=20, t=60, b=50),
+                    height=400,
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="center",
+                        x=0.5,
+                    ),
+                )
+                fig_three.update_xaxes(range=[0, 1], tickangle=0)
+                fig_three.update_yaxes(ticksuffix="%")
+
+                st.plotly_chart(fig_three, use_container_width=True)
+
+                st.markdown("#### 결론")
+                st.markdown(
+                    "> **세 지표(개체 일치 점수·답변 관련성 점수·문맥 충실도 점수)를 "
+                    "하나의 차트에 색상 구분하여 겹쳐 본 결과, "
+                    "환각 그룹(1)과 비환각 그룹(0) 간에 세 지표의 분포 경향이 "
+                    "서로 다른 위치에서 집중되는 양상을 확인할 수 있다.**"
+                )
+
+                st.caption(f"■ 선택된 그룹: {grp_label}  |  "
+                           f"총 표본수: {n_total}행  |  "
+                           f"표시: **세 지표 함께 보기** (개체 일치·답변 관련성·문맥 충실도)")
