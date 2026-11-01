@@ -21,7 +21,6 @@ KEEP_COLS = [
     "Context_Faithfulness_Score",
     "Hallucination_Type",
     "Is_Hallucination",
-    "Subjectivity_Score",          # ← 추가
 ]
 
 keep_map = {
@@ -36,7 +35,6 @@ keep_map = {
     "Context_Faithfulness_Score": "문맥 충실도 점수",
     "Hallucination_Type":         "환각 유형",
     "Is_Hallucination":           "환각 발생 여부",
-    "Subjectivity_Score":         "주관성 점수",          # ← 추가
 }
 
 def _generate_example(n=500):
@@ -55,7 +53,6 @@ def _generate_example(n=500):
         "Hallucination_Type":        np.random.choice(
             ["사실 왜곡","문맥 이탈","근거 부족","없음"], n),
         "Is_Hallucination":          np.random.choice([0, 1], n, p=[0.6, 0.4]),
-        "Subjectivity_Score":        np.round(np.random.uniform(0, 1, n), 4),  # ← 추가
     })
     raw.to_csv(CSV_PATH, index=False)
     return raw.rename(columns=keep_map)
@@ -170,15 +167,12 @@ if menu == "서론":
     st.markdown(
         "- **문맥 충실도 점수**: 답변이 제공된 문맥에 근거하는 정도"
     )
-    st.markdown(
-        "- **주관성 점수**: 답변에 나타나는 주관성의 정도"
-    )
     st.markdown("- **환각 발생 여부**: 없으면 0, 있으면 1로 표시")
     st.warning(
         "실제 실험이 아닌 합성 데이터이고 4개의 모델에 한정되어 있으므로 "
         "분석 결과를 보편적인 LLM으로 해석하지 마십시오."
     )
-    # 클릭 가능한 원본 링크
+    # 클릭 가능한 원본 링크 (수정됨)
     st.markdown(
         "[원본 데이터셋 (HuggingFace)]"
         "(https://huggingface.co/datasets/vkshdev/rag-hallucination-benchmark)"
@@ -212,13 +206,13 @@ if menu == "서론":
 
 
 # ============================================================
-# 5. 막대그래프  (x축: 입력 토큰 수 / 문장 복잡도 지수 / 주관성 점수)
+# 5. 막대그래프
 # ============================================================
 elif menu == "막대그래프":
     x_options_bar = [
         "입력 토큰 수",
         "문장 복잡도 지수",
-        "주관성 점수",              # ← 추가
+        "데이터베이스 유사도 점수",
     ]
     _init_session("bar_xidx", 0)
     _init_session("bar_n", 8)
@@ -246,9 +240,9 @@ elif menu == "막대그래프":
     x_attr   = x_options_bar[st.session_state["bar_xidx"]]
 
     col_x_map = {
-        "입력 토큰 수":     "입력 토큰 수",
-        "문장 복잡도 지수": "문장 복잡도 지수",
-        "주관성 점수":     "주관성 점수",              # ← 추가
+        "입력 토큰 수":             "입력 토큰 수",
+        "문장 복잡도 지수":         "문장 복잡도 지수",
+        "데이터베이스 유사도 점수": "데이터베이스 유사도 점수",
     }
     col_x   = col_x_map[x_attr]
     title_x = x_attr
@@ -327,7 +321,7 @@ elif menu == "막대그래프":
     for i in range(n_show):
         lo = float(edges_full[i])
         hi = float(edges_full[i+1])
-        if "유사도" in title_x or "복잡도" in title_x or "주관성" in title_x:
+        if "유사도" in title_x or "복잡도" in title_x:
             fmt = ".4f"
         else:
             fmt = ".2f"
@@ -340,7 +334,7 @@ elif menu == "막대그래프":
 
 
 # ============================================================
-# 6. 히트맵  (변경 없음)
+# 6. 히트맵
 # ============================================================
 elif menu == "히트맵":
     hm_colors = ["붉은색", "푸른색", "초록색"]
@@ -517,7 +511,7 @@ elif menu == "히트맵":
 
 
 # ============================================================
-# 7. 히스토그램1  (변경 없음)
+# 7. 히스토그램1
 # ============================================================
 elif menu == "히스토그램1":
     _init_session("hist1_attr_idx", 0)
