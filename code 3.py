@@ -1,478 +1,614 @@
-import io
+import os
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
+import plotly.graph_objects as go
 
-# ─────────────────────────────────────────────────────────────
-# 데이터 로드
-#    - CSV가 있고 열 이름도 일치하면 실제 데이터 사용
-#    - CSV가 없거나 열 이름이 맞지 않으면 예시 데이터 500행 생성
-# ─────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
+# 0. 데이터 로딩 · 열 삭제 · 한국어 개명
+# ──────────────────────────────────────────────
 CSV_PATH = "rag_hallucination.csv"
 
-keep_map = {
-    "Temperature": "온도 설정값",
-    "Database_Similarity_Score": "데이터베이스 유사도 점수",
-    "Subjectivity_Score": "주관성 점수",
-    "Context_Response_Overlap_Ratio": "문맥-답변 중첩 비율",
-    "Contradiction_Words_Count": "모순 단어 수",
-    "Input_Token_Count": "입력 토큰 수",
-    "Sentence_Complexity_Index": "문장 복잡도 지수",
-    "Entity_Match_Score": "개체 일치 점수",
-    "Answer_Relevance_Score": "답변 관련성 점수",
-    "Context_Faithfulness_Score": "문맥 충실도 점수",
-    "Hallucination_Status": "환각 발생 여부",
-}
-expected_cols = list(keep_map.keys())
-
-try:
-    df_raw = pd.read_csv(CSV_PATH)
-    missing = [c for c in expected_cols if c not in df_raw.columns]
-    if missing:
-        st.warning(
-            f"CSV에 필요한 열이 부족합니다: {', '.join(missing)}. "
-            "예시 데이터로 대체합니다."
-        )
-        raise KeyError(f"Missing columns: {missing}")
-    df = df_raw[expected_cols].rename(columns=keep_map)
-except (FileNotFoundError, KeyError):
+if not os.path.exists(CSV_PATH):
     np.random.seed(42)
     n = 500
-    temp = np.round(np.random.uniform(0.0, 1.0, n), 2)
-    db_sim = np.round(np.random.uniform(0.0, 1.0, n), 2)
-    subj = np.round(np.random.uniform(0.0, 1.0, n), 2)
-    overlap = np.round(np.random.uniform(0.0, 1.0, n), 2)
-    contra = np.random.randint(0, 15, n)
-    token = np.random.randint(20, 500, n)
-    complexity = np.round(np.random.uniform(0.3, 1.0, n), 2)
-    entity = np.round(np.random.uniform(0.2, 1.0, n), 2)
-    relevance = np.round(np.random.uniform(0.2, 1.0, n), 2)
-    faithful = np.round(np.random.uniform(0.2, 1.0, n), 2)
-    hall = np.random.choice([0, 1], n, p=[0.55, 0.45])
-    df = pd.DataFrame({
-        "온도 설정값": temp,
-        "데이터베이스 유사도 점수": db_sim,
-        "주관성 점수": subj,
-        "문맥-답변 중첩 비율": overlap,
-        "모순 단어 수": contra,
-        "입력 토큰 수": token,
-        "문장 복잡도 지수": complexity,
-        "개체 일치 점수": entity,
-        "답변 관련성 점수": relevance,
-        "문맥 충실도 점수": faithful,
-        "환각 발생 여부": hall,
+    df_raw = pd.DataFrame({
+        "index": range(n),
+        "Interaction_ID":             [f"INT-{i:04d}" for i in range(n)],
+        "User_Prompt":               [f"질문 {i}" for i in range(n)],
+        "Provided_Context":          [f"문맥 {i}" for i in range(n)],
+        "LLM_Generated_Response":    [f"응답 {i}" for i in range(n)],
+        "LLM_Model_Name":            np.random.choice(
+            ["gpt-4","claude-3","gemini-pro","llama-3"], n),
+        "Temperature_Setting":       np.round(np.random.uniform(0,2,n), 2),
+        "Vector_DB_Similarity_Score": np.round(np.random.uniform(0,1,n), 4),
+        "Prompt_Tokens":             np.random.randint(50, 500, n),
+        "Response_Tokens":           np.random.randint(20, 300, n),
+        "Context_Response_Overlap_Ratio": np.round(np.random.uniform(0,1,n), 4),
+        "Entity_Match_Score":        np.round(np.random.uniform(0,1,n), 4),
+        "Sentence_Complexity_Index": np.round(np.random.uniform(0,1,n), 4),
+        "Subjectivity_Score":        np.round(np.random.uniform(0,1,n), 4),
+        "Contradiction_Words_Count": np.random.randint(0, 10, n),
+        "Answer_Relevance_Score":    np.round(np.random.uniform(0,1,n), 4),
+        "Context_Faithfulness_Score":np.round(np.random.uniform(0,1,n), 4),
+        "Hallucination_Type":        np.random.choice(
+            ["사실 왜곡","문맥 이탈","근거 부족","없음"], n),
+        "Is_Hallucination":          np.random.choice([0,1], n, p=[0.6,0.4]),
     })
-    df.to_csv(CSV_PATH, index=False)
+    df_raw.to_csv(CSV_PATH, index=False)
 
-# 파생 열 3종
-df["개체-문맥"] = (df["개체 일치 점수"] - df["문맥 충실도 점수"]).abs()
-df["개체-답변관련성"] = (df["개체 일치 점수"] - df["답변 관련성 점수"]).abs()
-df["답변관련성-문맥충실도"] = (df["답변 관련성 점수"] - df["문맥 충실도 점수"]).abs()
+df = pd.read_csv(CSV_PATH)
 
-# ─────────────────────────────────────────────────────────────
-# 전역 변수
-# ─────────────────────────────────────────────────────────────
-score_cols = ["개체 일치 점수", "답변 관련성 점수", "문맥 충실도 점수"]
+DROP_COLS = [
+    "index", "Interaction_ID", "User_Prompt", "Provided_Context",
+    "LLM_Generated_Response", "Subjectivity_Score",
+    "Context_Response_Overlap_Ratio", "Contradiction_Words_Count",
+]
+df = df.drop(columns=[c for c in DROP_COLS if c in df.columns])
+
+RENAME_MAP = {
+    "LLM_Model_Name":             "모델 이름",
+    "Temperature_Setting":        "온도 설정값",
+    "Vector_DB_Similarity_Score": "데이터베이스 유사도 점수",
+    "Prompt_Tokens":              "입력 토큰 수",
+    "Response_Tokens":            "답변 토큰 수",
+    "Entity_Match_Score":         "개체 일치 점수",
+    "Sentence_Complexity_Index":  "복잡도 지수",
+    "Answer_Relevance_Score":     "답변 관련성 점수",
+    "Context_Faithfulness_Score": "문맥 충실도 점수",
+    "Hallucination_Type":         "환각 유형",
+    "Is_Hallucination":           "환각 발생 여부",
+}
+df = df.rename(columns=RENAME_MAP)
+
+# ──────────────────────────────────────────────
+# 신규 열: 차이 절댓값 3종
+# ──────────────────────────────────────────────
+df["개체-문맥"]              = (df["개체 일치 점수"] - df["문맥 충실도 점수"]).abs()
+df["개체-답변관련성"]        = (df["개체 일치 점수"] - df["답변 관련성 점수"]).abs()
+df["답변관련성-문맥충실도"]  = (df["답변 관련성 점수"] - df["문맥 충실도 점수"]).abs()
+
+# ──────────────────────────────────────────────
+# 라벨 변수 정의
+# ──────────────────────────────────────────────
+score_cols = [
+    "개체 일치 점수",
+    "답변 관련성 점수",
+    "문맥 충실도 점수",
+]
+
 score_labels = {
-    "개체 일치 점수": "개체 일치 점수",
-    "답변 관련성 점수": "답변 관련성 점수",
-    "문맥 충실도 점수": "문맥 충실도 점수",
+    "개체 일치 점수":     "개체 일치 점수",
+    "답변 관련성 점수":   "답변 관련성 점수",
+    "문맥 충실도 점수":   "문맥 충실도 점수",
 }
 
-version = "버전 1.0"
+type_color_map = {
+    "Fabrication":   "#1f77b4",
+    "Contradiction": "#d62728",
+    "Unrelated":     "#2ca02c",
+}
 
-# ─────────────────────────────────────────────────────────────
-# 페이지 설정 + 사이드바
-# ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="LLM 환각 분석", layout="wide")
-st.sidebar.title("LLM 환각 분석")
-st.sidebar.caption(version)
+# ──────────────────────────────────────────────
+# 상자그림 대상 열 + 라벨
+# ──────────────────────────────────────────────
+BOX_COLS = [
+    "개체-문맥",
+    "개체-답변관련성",
+    "답변관련성-문맥충실도",
+]
+BOX_LABELS = {
+    "개체-문맥":              "개체-문맥 (개체 일치 점수 − 문맥 충실도 점수)",
+    "개체-답변관련성":        "개체-답변관련성 (개체 일치 점수 − 답변 관련성 점수)",
+    "답변관련성-문맥충실도":  "답변관련성-문맥충실도 (답변 관련성 점수 − 문맥 충실도 점수)",
+}
 
-menu = st.sidebar.selectbox(
-    "차례",
-    ["서론", "히트맵", "막대그래프", "히스토그램1"],
-    index=0,
-    key="menu_selectbox",
+# ──────────────────────────────────────────────
+# 세션 상태 헬퍼
+# ──────────────────────────────────────────────
+def _init_session(key, default):
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+def _cycle(arr, key, delta):
+    n = len(arr)
+    cur = st.session_state[key]
+    nxt = (cur + delta) % n
+    st.session_state[key] = nxt
+    return arr[nxt]
+
+def _cycle_int(min_val, max_val, key, delta):
+    cur = st.session_state[key]
+    nxt = cur + delta
+    if nxt < min_val:
+        nxt = max_val
+    elif nxt > max_val:
+        nxt = min_val
+    st.session_state[key] = nxt
+    return nxt
+
+# ──────────────────────────────────────────────
+# 1. 사이드바 메뉴
+# ──────────────────────────────────────────────
+st.sidebar.title("메뉴")
+menu = st.sidebar.radio(
+    "이동",
+    ["서론", "히트맵", "상자그림", "막대그래프", "히스토그램1"],
+    key="menu_radio",
 )
 
-# ============================================================
-# 1. 서론  (상자그림 삭제, 데이터 설명, 분석대상표본수 추가)
-# ============================================================
+# ──────────────────────────────────────────────
+# 2. 공통 제목
+# ──────────────────────────────────────────────
+st.title("LLM의 환각작용")
+
+# ──────────────────────────────────────────────
+# 3. 서론
+# ──────────────────────────────────────────────
 if menu == "서론":
-    st.title("LLM의 환각 작용은 어떤 조건과 관련도가 높은가?")
+    st.write("서론 내용은 아직 준비 중입니다.")
 
-    # ── 분석대상표본수 ────────────────────────────────────────
-    total_n = len(df)
-    hall_n = int((df["환각 발생 여부"] == 1).sum())
-    non_hall_n = total_n - hall_n
-    st.markdown(
-        f"### 분석 대상 표본 수: **{total_n}행**  "
-        f"(환각: {hall_n}행 · 비환각: {non_hall_n}행)"
-    )
-
-    st.markdown(
-        """
-        대규모 언어 모델(LLM)이 생성하는 응답에는 사실과 다른 내용, 무관한 내용,
-        내부적으로 모순된 내용이 포함될 수 있습니다. 이를 **환각(hallucination)** 이라 하며,
-        어떤 조건에서 환각이 더 자주 발생하는지 살펴보는 것이 이 분석의 목적입니다.
-        """
-    )
-
-    # ── 데이터 설명 ──────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 데이터 설명")
-
-    st.markdown(
-        """
-        - **데이터 구조**: RAG 환경 바탕 합성 데이터 30,000건
-          (GPT-4o, Claude-3.5-Sonnet, Mistral-7B, Llama-3-70B 모델 포함)
-        """
-    )
-    st.markdown("#### 데이터 속성")
-    st.markdown(
-        """
-        | 속성 | 설명 |
-        |------|------|
-        | 입력 토큰 수 | 프롬프트에 입력된 토큰 수 |
-        | 문장 복잡도 | 답변을 구성하는 구조, 언어적 복잡성 |
-        | 데이터베이스 유사도 | 벡터 데이터베이스에서 검색된 자료와 검색 기준 사이의 유사도 |
-        | 개체 일치도 | 답변의 개체가 제공된 문맥과 일치하는 정도 |
-        | 답변 관련성 | 답변이 질문과 관련되고 의도에 부합하는 정도 |
-        | 문맥 충실도 | 답변이 제공된 문맥에 근거하는 정도 |
-        | 환각 발생 여부 | 없으면 0, 있으면 1로 표시 |
-        """
-    )
-
-    st.warning(
-        "실제 실험이 아닌 합성 데이터이고 4개의 모델에 한정되어 있으므로 "
-        "분석 결과를 보편적인 LLM으로 해석하지 마십시오."
-    )
-
-    st.markdown(
-        "[원본 데이터셋 (HuggingFace)](https://huggingface.co/datasets/vkshdev/rag-hallucination-benchmark?utm_source=chatgpt.com)"
-    )
-
-    st.markdown("---")
-    st.markdown("### 작은 질문")
-
-    st.markdown(
-        """
-        1. **입력 토큰 수, 문장 복잡도, 데이터베이스 유사도의 수치에 따라 환각률은
-        어떻게 나타나는가?**
-        → [막대그래프] 에서 구간별 환각 발생률을 확인할 수 있습니다.
-        """
-    )
-    st.markdown(
-        """
-        2. **데이터베이스 유사도와 온도 설정값에 따라 환각률은 어떻게 변화하는가?**
-        → [히트맵] 에서 두 변수의 조합별 환각률을 색깔로 비교할 수 있습니다.
-        """
-    )
-    st.markdown(
-        """
-        3. **환각 발생 여부가 0, 1일 때 각각 개체 일치도, 답변 관련성,
-        문맥 충실도 점수는 어떻게 분포하는가?**
-        → [히스토그램1] 에서 그룹별 점수 분포를 비교할 수 있습니다.
-        """
-    )
-
-    st.markdown("---")
-
-# ============================================================
-# 2. 히트맵
-# ============================================================
+# ──────────────────────────────────────────────
+# 4. 히트맵
+# ──────────────────────────────────────────────
 elif menu == "히트맵":
-    st.title("LLM의 환각작용")
+    hm_colors = ["붉은색", "푸른색", "초록색"]
+    _init_session("hm_n", 6)
+    _init_session("hm_ci", 0)
 
-    st.sidebar.markdown("#### 히트맵 설정")
+    c0, c1, c2, c3, c4, c5 = st.columns([1, 1.2, 1, 1, 1.5, 1])
+    with c0:
+        if st.button("◀", key="hm_n_left"):
+            _cycle_int(5, 15, "hm_n", -1)
+    with c1:
+        st.caption(f"{st.session_state['hm_n']}×{st.session_state['hm_n']}")
+    with c2:
+        if st.button("▶", key="hm_n_right"):
+            _cycle_int(5, 15, "hm_n", 1)
+    with c3:
+        if st.button("◀", key="hm_c_left"):
+            _cycle(hm_colors, "hm_ci", -1)
+    with c4:
+        st.caption(hm_colors[st.session_state["hm_ci"]])
+    with c5:
+        if st.button("▶", key="hm_c_right"):
+            _cycle(hm_colors, "hm_ci", 1)
 
-    hm_n = st.sidebar.selectbox(
-        "행렬수",
-        options=list(range(5, 16)),
-        index=4,
-        key="hm_n_selectbox",
+    n_cells      = st.session_state["hm_n"]
+    color_choice = hm_colors[st.session_state["hm_ci"]]
+
+    if color_choice == "붉은색":
+        colorscale = [[0, "#fff5f5"], [0.5, "#fca5a5"], [1, "#b91c1c"]]
+    elif color_choice == "푸른색":
+        colorscale = [[0, "#f0f9ff"], [0.5, "#38bdf8"], [1, "#0c4a6e"]]
+    else:
+        colorscale = [[0, "#f0fdf4"], [0.5, "#4ade80"], [1, "#166534"]]
+
+    temp_col     = "온도 설정값"
+    sim_col      = "데이터베이스 유사도 점수"
+    n_total_all  = len(df)
+    n_hall_total = int((df["환각 발생 여부"] == 1).sum())
+
+    bin_labels_t = [f"Bin {i+1}" for i in range(n_cells)]
+    bin_labels_s = [f"Bin {i+1}" for i in range(n_cells)]
+
+    df["temp_bin"] = pd.cut(
+        df[temp_col], bins=n_cells,
+        labels=bin_labels_t, include_lowest=True,
     )
-    hm_n = int(hm_n)
-
-    color_cycle = ["reds", "blues", "greens"]
-    hm_color_idx = st.sidebar.selectbox(
-        "색상",
-        options=range(len(color_cycle)),
-        index=0,
-        format_func=lambda i: color_cycle[i],
-        key="hm_color_selectbox",
+    df["sim_bin"] = pd.cut(
+        df[sim_col], bins=n_cells,
+        labels=bin_labels_s, include_lowest=True,
     )
-    hm_colorscale = color_cycle[hm_color_idx]
-
-    x_col = "온도 설정값"
-    y_col = "데이터베이스 유사도 점수"
-    z_col = "환각 발생 여부"
-
-    x_min, x_max = float(df[x_col].min()), float(df[x_col].max())
-    y_min, y_max = float(df[y_col].min()), float(df[y_col].max())
-
-    x_bins = np.linspace(x_min, x_max, hm_n + 1)
-    y_bins = np.linspace(y_min, y_max, hm_n + 1)
-
-    df["_z_bin"] = pd.cut(
-        df[z_col],
-        bins=hm_n,
-        labels=[f"구간 {i+1}" for i in range(hm_n)],
-        include_lowest=True,
-    )
-
-    pivot_z = df.pivot_table(
-        index=pd.cut(df[y_col], bins=y_bins, include_lowest=True),
-        columns=pd.cut(df[x_col], bins=x_bins, include_lowest=True),
-        values="_z_bin",
-        aggfunc=lambda s: (s == 1).sum() / s.count() * 100
-        if s.count() > 0
-        else np.nan,
-        observed=True,
-    )
-    pivot_z = pivot_z.sort_index(ascending=False)
-
-    pivot_counts = df.pivot_table(
-        index=pd.cut(df[y_col], bins=y_bins, include_lowest=True),
-        columns=pd.cut(df[x_col], bins=x_bins, include_lowest=True),
-        values="_z_bin",
-        aggfunc="count",
-        observed=True,
-    )
-    pivot_counts = pivot_counts.sort_index(ascending=False)
-
-    fig_hm = go.Figure()
-    fig_hm.add_trace(
-        go.Heatmap(
-            z=pivot_z.values,
-            x=[f"구간 {i+1}" for i in range(hm_n)],
-            y=[f"구간 {i+1}" for i in range(hm_n)],
-            colorscale=hm_colorscale,
-            showscale=True,
-            zmin=0,
-            zmax=100,
-            hoverongaps=False,
-            colorbar=dict(title="환각률(%)"),
-        )
-    )
-    fig_hm.update_yaxes(autorange="reversed")
-    fig_hm.update_layout(
-        xaxis_title=x_col,
-        yaxis_title=y_col,
-        template="plotly_white",
-        height=520,
-        margin=dict(l=60, r=30, t=30, b=50),
-    )
-
-    st.plotly_chart(fig_hm, use_container_width=True)
-
-    st.markdown(
-        "**데이터베이스와 유사할 수록 환각률이 낮고, 답변의 무작위성을 높게 설정할 수록 "
-        "환각률이 높게 나타난다.**"
-    )
-
-    st.markdown("### 구간별 표본수")
-    st.dataframe(
-        pivot_counts.rename_axis(None, axis=0).rename_axis(None, axis=1),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.markdown("### 축 양끝값")
-    c1, c2, c3 = st.columns(3)
-    c1.caption("X축 왼쪽 끝: 0")
-    c2.caption(f"X축 오른쪽 끝: {x_max}")
-    c3.caption(f"Y축 아래쪽 끝: {y_max}")
-
-# ============================================================
-# 3. 막대그래프  (JSON 직렬화 오류 수정)
-# ============================================================
-elif menu == "막대그래프":
-    st.title("LLM의 환각작용")
-
-    st.sidebar.markdown("#### 막대그래프 설정")
-
-    bar_x_options = [
-        ("입력 토큰 수", "입력 토큰 수"),
-        ("문장 복잡도 지수", "문장 복잡도 지수"),
-        ("데이터베이스 유사도 점수", "데이터베이스 유사도 점수"),
-    ]
-    bar_x_idx = st.sidebar.selectbox(
-        "X축 속성",
-        options=range(len(bar_x_options)),
-        index=0,
-        format_func=lambda i: bar_x_options[i][0],
-        key="bar_x_selectbox",
-    )
-    bar_x_col = bar_x_options[bar_x_idx][1]
-
-    bar_n = st.sidebar.selectbox(
-        "구간 개수",
-        options=list(range(1, 11)),
-        index=7,
-        key="bar_n_selectbox",
-    )
-    bar_n = int(bar_n)
-
-    try:
-        bins = pd.qcut(df[bar_x_col], q=bar_n, duplicates="drop")
-        bins = bins.cat.remove_unused_categories()
-        n_actual = bins.nunique()
-        labels = [f"구간 {i+1}" for i in range(n_actual)]
-        df["_bar_bin"] = pd.cut(
-            df[bar_x_col],
-            bins=bins.cat.categories.right,
-            include_lowest=True,
-            labels=labels[:n_actual],
-        )
-    except ValueError:
-        n_actual = min(bar_n, len(df) // 5)
-        if n_actual < 1:
-            n_actual = 1
-        bins = np.linspace(df[bar_x_col].min(), df[bar_x_col].max(), n_actual + 1)
-        df["_bar_bin"] = pd.cut(df[bar_x_col], bins=bins, include_lowest=True)
 
     agg = (
-        df.groupby("_bar_bin", observed=True)
+        df.groupby(["sim_bin", "temp_bin"], observed=True)
         .agg(
             전체_행수=("환각 발생 여부", "count"),
             환각_행수=("환각 발생 여부", lambda x: (x == 1).sum()),
         )
         .reset_index()
     )
-    agg["환각률(%)"] = (agg["환각_행수"] / agg["전체_행수"] * 100).round(2)
-
-    boundaries = sorted(set(df["_bar_bin"].dropna().cat.categories))
-
-    # ── JSON 직렬화 호환: 범주형 → 문자열, 실수 → float ──────
-    x_labels = [str(x) for x in agg["_bar_bin"]]
-    y_vals_bar = [float(y) for y in agg["환각률(%)"]]
-    text_vals = [f"{y:.2f}%" for y in agg["환각률(%)"]]
-
-    fig_bar = go.Figure()
-    fig_bar.add_trace(
-        go.Bar(
-            x=x_labels,
-            y=y_vals_bar,
-            text=text_vals,
-            textposition="outside",
-            marker_color="steelblue",
-            name=f"{bar_x_col} 구간별 환각률(%)",
-        )
-    )
-    fig_bar.update_layout(
-        xaxis_title=bar_x_col,
-        yaxis_title="환각 발생률 (%)",
-        yaxis_range=[0, max(max(y_vals_bar) * 1.2, 10)],
-        template="plotly_white",
-        height=500,
-        bargap=0.25,
-        margin=dict(l=50, r=30, t=30, b=55),
+    agg["환각률(%)"] = agg.apply(
+        lambda r: round(r["환각_행수"] / r["전체_행수"] * 100, 2)
+        if r["전체_행수"] > 0 else np.nan,
+        axis=1,
     )
 
-    st.plotly_chart(fig_bar, use_container_width=True)
+    hm_data  = agg.pivot_table(
+        index="sim_bin", columns="temp_bin",
+        values="환각률(%)", fill_value=np.nan,
+    ).reindex(index=bin_labels_s, columns=bin_labels_t, fill_value=np.nan)
+    cnt_data = agg.pivot_table(
+        index="sim_bin", columns="temp_bin",
+        values="전체_행수", fill_value=0,
+    ).reindex(index=bin_labels_s, columns=bin_labels_t, fill_value=0)
 
-    st.markdown(
-        "**입력 토큰 수에 따라 환각률은 고르고, 문장 복잡도에 따라서는 뚜렷한 결과가 보이지 않으며, "
-        "데이터베이스 유사도에 따라선 x축 값이 증가함에 따라 환각률이 낮아지는 경향이 두드러진다.**"
-    )
+    x_max = float(df[temp_col].max())
+    x_min = float(df[temp_col].min())
+    y_max = float(df[sim_col].max())
+    y_min = float(df[sim_col].min())
 
-    st.markdown("### 구간 경계값")
-    st.caption(" | ".join([str(b) for b in boundaries]))
-
-    st.markdown("### 전체 표본수")
-    st.caption(f"전체: {total_n}행 | 환각: {hall_n}행 | 비환각: {non_hall_n}행")
-
-# ============================================================
-# 4. 히스토그램1
-# ============================================================
-elif menu == "히스토그램1":
-    st.title("LLM의 환각작용")
-
-    st.sidebar.markdown("#### 히스토그램1 설정")
-
-    hist_score_idx = st.sidebar.selectbox(
-        "관찰 속성",
-        options=range(len(score_cols)),
-        index=0,
-        format_func=lambda i: score_cols[i],
-        key="hist_score_selectbox",
-    )
-    sel_score = score_cols[hist_score_idx]
-
-    group_options = [("0 (비환각)", 0), ("1 (환각)", 1)]
-    group_idx = st.sidebar.selectbox(
-        "그룹",
-        options=range(len(group_options)),
-        index=0,
-        format_func=lambda i: group_options[i][0],
-        key="hist_group_selectbox",
-    )
-    sel_group = group_options[group_idx][1]
-
-    score_kr = score_labels.get(sel_score, sel_score)
-    group_name = f"{sel_group} ( {'비환각' if sel_group == 0 else '환각'} )"
-    subset = df[df["환각 발생 여부"] == sel_group][sel_score].dropna()
-    group_n = len(df[df["환각 발생 여부"] == sel_group])
-
-    if len(subset) == 0:
-        st.warning(f"선택된 그룹 '{group_name}'에 점수 '{score_kr}' 데이터가 없습니다.")
-        st.stop()
-
-    counts, bin_edges = np.histogram(subset, bins=10)
-    pct = counts / len(subset) * 100
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-    fig_hist = go.Figure()
-    fig_hist.add_trace(
-        go.Bar(
-            x=[float(c) for c in bin_centers],
-            y=[float(p) for p in pct],
-            name=f"{score_kr} ({group_name})",
-            marker_color="#4C78A8",
-            opacity=0.85,
+    fig_hm = go.Figure()
+    fig_hm.add_trace(
+        go.Heatmap(
+            z=hm_data.values,
+            x=list(range(n_cells)),
+            y=list(range(n_cells)),
+            colorscale=colorscale,
+            zmin=0, zmax=100,
+            colorbar=dict(title="환각률 (%)", thickness=15, len=0.8),
+            hoverongaps=False,
             hovertemplate=(
-                "점수 구간 중심: %{x:.3f}<br>"
-                "비율: %{y:.2f}%<extra></extra>"
+                "온도 구간: %{x}<br>"
+                "유사도 구간: %{y}<br>"
+                "환각률: %{z:.1f}%<extra></extra>"
             ),
         )
     )
 
-    x_min = float(subset.min())
-    x_max = float(subset.max())
-    fig_hist.update_xaxes(range=[x_min, x_max], title_text=score_kr, tickformat=".3f")
-    fig_hist.update_yaxes(title_text="비율(%)", range=[0, max(100, float(pct.max()) * 1.15)])
-
-    fig_hist.update_layout(
-        title=f"히스토그램 — {score_kr} · {group_name} (n={group_n})<br>"
-        f"10개 빈 · y축: 해당 그룹 내 백분율(%)",
-        height=420,
-        margin=dict(l=50, r=30, t=80, b=55),
-        bargap=0.12,
+    fig_hm.update_layout(
+        title=(
+            f"히트맵 — 온도 설정값 × 데이터베이스 유사도 점수  ·  "
+            f"환각률(%)  ·  {n_cells}×{n_cells}  ·  "
+            f"전체 표본수: {n_total_all}행"
+        ),
+        xaxis_title=temp_col,
+        yaxis_title=sim_col,
+        xaxis=dict(
+            tickmode="array",
+            tickvals=list(range(n_cells)),
+            ticktext=bin_labels_t,
+            showspikes=False,
+        ),
+        yaxis=dict(
+            tickmode="array",
+            tickvals=list(range(n_cells)),
+            ticktext=bin_labels_s,
+            autorange="reversed",
+            showspikes=False,
+        ),
+        template="plotly_white",
+        height=560,
+        margin=dict(l=70, r=30, t=80, b=70),
     )
 
-    st.plotly_chart(fig_hist, use_container_width=True)
+    fig_hm.add_annotation(
+        x=-0.04, y=-0.10,
+        text="0",
+        showarrow=False,
+        xref="paper", yref="paper",
+        font=dict(size=11),
+    )
+    fig_hm.add_annotation(
+        x=1.04, y=-0.10,
+        text=str(round(x_max, 3)),
+        showarrow=False,
+        xref="paper", yref="paper",
+        font=dict(size=11),
+    )
+    fig_hm.add_annotation(
+        x=-0.08, y=-0.10,
+        text=str(round(y_max, 3)),
+        showarrow=False,
+        xref="paper", yref="paper",
+        font=dict(size=11),
+    )
 
+    st.plotly_chart(fig_hm, use_container_width=True)
+
+    st.markdown("#### 결론")
     st.markdown(
-        f"**환각 여부가 {sel_group}인 그룹에서 {score_kr} 점수가 "
-        f"전체적으로 {'높은' if sel_group == 0 else '낮은'} 값에 분포하고 있다.**"
+        "> **데이터베이스와 유사할 수록 환각률이 낮고, 답변의 무작위성을 높게 설정할 수록 "
+        "환각률이 높게 나타난다.**"
     )
 
-    st.markdown("### 분포 요약")
-    st.caption(
-        f"그룹 {group_name} 전체 표본수: {group_n}행 "
-        f"(점수 결측 제외: {len(subset)}행)"
-    )
-    st.caption(
-        f"평균 {subset.mean():.3f} · 중앙값 {subset.median():.3f} · "
-        f"표준편차 {subset.std():.3f} · 최소 {subset.min():.3f} · 최대 {subset.max():.3f}"
+    st.markdown("#### 칸별 표본수")
+    st.caption("※ 히트맵과 동일한 격자 구조이며, 각 셀에는 해당 범위 내 전체 행수를 표시합니다.")
+
+    cnt_df = pd.DataFrame(cnt_data.values,
+                          index=bin_labels_s,
+                          columns=bin_labels_t)
+    cnt_df.index.name = "유사도 \\ 온도"
+    st.dataframe(cnt_df, use_container_width=True, hide_index=True)
+    st.caption(f"※ 전체 표본수: {n_total_all}행  "
+               f"(환각: {n_hall_total}행 / 비환각: {n_total_all - n_hall_total}행)")
+
+    st.markdown("#### 축 양끝값")
+    st.caption(f"■ 온도 설정값 (X축):  {x_min:.3f}  ~  {x_max:.3f}")
+    st.caption(f"■ 데이터베이스 유사도 점수 (Y축, 아래=작은값):  {y_min:.4f}  ~  {y_max:.4f}")
+
+# ──────────────────────────────────────────────
+# 5. 상자그림  (색상선택 제거, 이상치 표시, 폭 축소·세로 확장)
+# ──────────────────────────────────────────────
+elif menu == "상자그림":
+    _init_session("box_col_idx", 0)
+    BOX_COL = BOX_COLS[st.session_state["box_col_idx"]]
+
+    col_ctrl, col_viz = st.columns([1, 2])
+
+    with col_ctrl:
+        st.markdown("#### 상자그림 설정")
+
+        # ── 열 선택 (화살표 버튼 압축, 한 줄) ──
+        c0, c1, c2 = st.columns([1, 3.5, 1])
+        with c0:
+            if st.button("◀", key="box_col_left"):
+                _cycle(BOX_COLS, "box_col_idx", -1)
+        with c1:
+            st.caption(BOX_LABELS[BOX_COL])
+        with c2:
+            if st.button("▶", key="box_col_right"):
+                _cycle(BOX_COLS, "box_col_idx", 1)
+
+        # ── 이상치 표시 토글 (기본값: 표시) ──
+        show_outliers = st.checkbox(
+            "이상치 표시",
+            value=True,
+            help="상자 그림 바깥의 개별 이상치 점을 표시합니다.",
+            key="box_outliers_checkbox",
+        )
+
+    y_vals  = df[BOX_COL].dropna()
+    n_total = len(y_vals)
+
+    # 폭 축소(width=0.06), 세로 확장(height=700)
+    fig_box = go.Figure()
+    fig_box.add_trace(
+        go.Box(
+            y=y_vals,
+            name=BOX_COL,
+            marker=dict(
+                color="#4C78A8",          # 기본 색상 고정 (선택 제거)
+                size=6,
+                opacity=0.9,
+            ),
+            fillcolor="#4C78A8",
+            opacity=0.75,
+            boxmean=True,                 # 평균 마름모 표시
+            boxpoints="outliers" if show_outliers else False,
+            width=0.06,                   # 폭 대폭 축소 → 세로로 긴 직사각형
+            line=dict(width=2, color="#4C78A8"),
+        )
     )
 
-    st.markdown("### 전체 표본수")
-    st.caption(
-        f"전체: {total_n}행 | 환각(1): {hall_n}행 | 비환각(0): {non_hall_n}행"
+    fig_box.update_layout(
+        title=(
+            f"상자그림 — {BOX_LABELS[BOX_COL]}  ·  전체 행수: {n_total}행"
+        ),
+        yaxis_title=BOX_COL,
+        xaxis=dict(showticklabels=False),
+        template="plotly_white",
+        height=700,           # 세로 확장 (기존 620 → 700)
+        margin=dict(l=50, r=30, t=70, b=50),
+        showlegend=False,
     )
 
-else:
-    st.stop()
+    q1  = float(np.percentile(y_vals, 25))
+    med = float(np.percentile(y_vals, 50))
+    q3  = float(np.percentile(y_vals, 75))
+    iqr = q3 - q1
+    lo  = q1 - 1.5 * iqr
+    hi  = q3 + 1.5 * iqr
+    n_outliers = int(((y_vals < lo) | (y_vals > hi)).sum())
+
+    fig_box.add_annotation(
+        x=0, y=med,
+        text=f"중앙값: {med:.3f}",
+        showarrow=True,
+        arrowhead=2,
+        arrowsize=1,
+        arrowwidth=1,
+        arrowcolor="#4C78A8",
+        ax=0, ay=-40,
+        font=dict(size=11, color="#4C78A8"),
+    )
+
+    st.plotly_chart(fig_box, use_container_width=True)
+
+    st.markdown("#### 분포 요약")
+    st.caption(f"■ 전체 표본수: {n_total}행")
+    st.caption(f"■ 최소값: {y_vals.min():.3f}  |  Q1: {q1:.3f}  |  "
+               f"중앙값: {med:.3f}  |  Q3: {q3:.3f}  |  최대값: {y_vals.max():.3f}")
+    st.caption(f"■ IQR: {iqr:.3f}  |  "
+               f"수염 하한: {lo:.3f}  |  수염 상한: {hi:.3f}")
+    st.caption(f"■ 이상치 개수: {n_outliers}개  "
+               f"({'표시' if show_outliers else '미표시'})")
+
+# ──────────────────────────────────────────────
+# 6. 막대그래프
+# ──────────────────────────────────────────────
+elif menu == "막대그래프":
+    x_options_bar = [
+        "입력 토큰 수",
+        "복잡도 지수",
+        "데이터베이스 유사도 점수",
+    ]
+    _init_session("bar_xidx", 0)
+    _init_session("bar_n", 8)
+
+    c0, c1, c2, c3, c4, c5 = st.columns([1, 2, 1, 1, 1.5, 1])
+    with c0:
+        if st.button("◀", key="bar_x_left"):
+            _cycle(x_options_bar, "bar_xidx", -1)
+    with c1:
+        st.caption(x_options_bar[st.session_state["bar_xidx"]])
+    with c2:
+        if st.button("▶", key="bar_x_right"):
+            _cycle(x_options_bar, "bar_xidx", 1)
+    with c3:
+        if st.button("−", key="bar_n_minus"):
+            _cycle_int(1, 10, "bar_n", -1)
+    with c4:
+        st.caption(f"{st.session_state['bar_n']}개")
+    with c5:
+        if st.button("+", key="bar_n_plus"):
+            _cycle_int(1, 10, "bar_n", 1)
+
+    N_BINS   = st.session_state["bar_n"]
+    HALL_COL = "환각 발생 여부"
+    x_attr   = x_options_bar[st.session_state["bar_xidx"]]
+
+    col_x_map = {
+        "입력 토큰 수":             "입력 토큰 수",
+        "복잡도 지수":              "복잡도 지수",
+        "데이터베이스 유사도 점수": "데이터베이스 유사도 점수",
+    }
+    col_x   = col_x_map[x_attr]
+    title_x = x_attr
+
+    def make_bar_graph(col_x, title_x):
+        edges_full = np.sort(np.unique(np.concatenate([
+            [df[col_x].min() - 1e-9],
+            np.quantile(df[col_x], np.linspace(0, 1, N_BINS + 1)),
+            [df[col_x].max() + 1e-9],
+        ])))
+        n_actual = len(edges_full) - 1
+        labels   = [f"Bin {i+1}" for i in range(n_actual)]
+
+        df["_bin"] = pd.cut(
+            df[col_x], bins=edges_full,
+            labels=labels, include_lowest=True,
+        )
+
+        agg = (
+            df.groupby("_bin", observed=True)
+            .agg(
+                전체_행수=(HALL_COL, "count"),
+                환각_행수=(HALL_COL, lambda x: (x == 1).sum()),
+            )
+            .reset_index()
+        )
+        agg["환각률(%)"] = agg.apply(
+            lambda r: round(r["환각_행수"] / r["전체_행수"] * 100, 2)
+            if r["전체_행수"] > 0 else np.nan,
+            axis=1,
+        )
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=agg["_bin"],
+                y=agg["환각률(%)"],
+                text=agg["환각률(%)"].apply(
+                    lambda v: f"{v}%" if not np.isnan(v) else "—"
+                ),
+                textposition="outside",
+                marker_color="steelblue",
+                hovertemplate=(
+                    "%{x}<br>"
+                    "환각률: %{y:.2f}%<br>"
+                    "전체 행수: %{customdata}행<extra></extra>"
+                ),
+                customdata=agg["전체_행수"].values,
+            )
+        )
+
+        fig.update_layout(
+            title=f"{title_x}  ·  구간별 환각 발생률 (%)  ·  {N_BINS}구간",
+            xaxis_title=title_x,
+            yaxis_title="환각 발생률 (%)",
+            yaxis_range=[0, max(100, agg["환각률(%)"].max() * 1.15)],
+            template="plotly_white",
+            height=420,
+            margin=dict(l=50, r=30, t=70, b=50),
+        )
+        return fig, edges_full
+
+    fig, edges_full = make_bar_graph(col_x, title_x)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("#### 결론")
+    st.markdown(
+        "> **입력토큰수에 따라 환각률은 고르고, 문장복잡도에 따라서는 뚜렷한 결과가 보이지 않으며, "
+        "데이터베이스유사도에 따라선 x축값이 증가함에 따라 환각률이 낮아지는 경향이 두드러진다.**"
+    )
+
+    st.markdown("#### 구간 경계값")
+    st.caption(f"■ {title_x} 구간 경계값 ({N_BINS}구간):")
+    n_show = len(edges_full) - 1
+    for i in range(n_show):
+        lo = float(edges_full[i])
+        hi = float(edges_full[i+1])
+        if "유사도" in title_x or "복잡도" in title_x:
+            fmt = ".4f"
+        else:
+            fmt = ".2f"
+        st.caption(f"  Bin {i+1}:  [{lo:{fmt}}, {hi:{fmt}})")
+    st.caption(f"■ 전체 표본수: {len(df)}행  "
+               f"(환각: {(df[HALL_COL]==1).sum()}행 / "
+               f"비환각: {(df[HALL_COL]==0).sum()}행)")
+
+# ──────────────────────────────────────────────
+# 7. 히스토그램1
+# ──────────────────────────────────────────────
+elif menu == "히스토그램1":
+    _init_session("hist1_attr_idx", 0)
+    _init_session("hist1_grp_idx", 0)
+    grp_options = ["0 (비환각)", "1 (환각)"]
+
+    c0, c1, c2, c3, c4, c5 = st.columns([1, 2.5, 1, 1, 2, 1])
+    with c0:
+        if st.button("◀", key="h1_attr_left"):
+            _cycle(score_cols, "hist1_attr_idx", -1)
+    with c1:
+        st.caption(score_cols[st.session_state["hist1_attr_idx"]])
+    with c2:
+        if st.button("▶", key="h1_attr_right"):
+            _cycle(score_cols, "hist1_attr_idx", 1)
+    with c3:
+        if st.button("◀", key="h1_grp_left"):
+            _cycle(grp_options, "hist1_grp_idx", -1)
+    with c4:
+        st.caption(grp_options[st.session_state["hist1_grp_idx"]])
+    with c5:
+        if st.button("▶", key="h1_grp_right"):
+            _cycle(grp_options, "hist1_grp_idx", 1)
+
+    sel_attr  = score_cols[st.session_state["hist1_attr_idx"]]
+    sel_group = grp_options[st.session_state["hist1_grp_idx"]]
+
+    n_total_0 = int((df["환각 발생 여부"] == 0).sum())
+    n_total_1 = int((df["환각 발생 여부"] == 1).sum())
+
+    grp       = 0 if "0" in sel_group else 1
+    grp_label = "그룹 0 (비환각)" if grp == 0 else "그룹 1 (환각)"
+    n_total   = n_total_0 if grp == 0 else n_total_1
+
+    sub = df[df["환각 발생 여부"] == grp]
+
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=sub[sel_attr],
+        nbinsx=10,
+        histnorm="percent",
+        name=grp_label,
+        marker_color="#4C78A8" if grp == 0 else "#E45759",
+        opacity=0.85,
+        text=[f"n = {n_total}"] * len(sub),
+        textposition="outside",
+    ))
+    fig.update_layout(
+        title=f"{grp_label}  ·  {sel_attr}  ·  n = {n_total}",
+        xaxis_title=sel_attr,
+        yaxis_title="비율 (%)",
+        bargap=0.1,
+        margin=dict(l=40, r=20, t=50, b=40),
+        height=360,
+        showlegend=False,
+    )
+    fig.update_xaxes(range=[0, 1], tickangle=0)
+    fig.update_yaxes(ticksuffix="%")
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("#### 결론")
+    st.markdown(
+        "> **환각여부가 0인 그룹과 비교했을때 환각여부가 1인 그룹에서 답변에서 제공된 "
+        "문맥에서의 각 개체가 일치하는 정도, 답변이 질문과 관련되어 있는 정도, "
+        "답변이 제공된 문맥에 근거하는 정도가 전부 상대적으로 낮은 값에 분포하고 있다.**"
+    )
+
+    st.caption(f"■ 선택된 그룹: {grp_label}  |  "
+               f"총 표본수: {n_total}행  |  "
+               f"분석 속성: {sel_attr}")
