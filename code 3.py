@@ -606,7 +606,7 @@ elif menu == "히스토그램1":
             f"분석 속성: {sel_attr}"
         )
 
-        else:
+    else:
         # ── 겹침 보기: 세 속성을 각각 [min, max] → [0, 1] 정규화 후 동일 축 겹침 ──
         sel_group = grp_options[st.session_state["hist1_grp_idx"]]
         grp       = 0 if "0" in sel_group else 1
