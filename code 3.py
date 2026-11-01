@@ -24,7 +24,6 @@ if not os.path.exists(CSV_PATH):
         "Vector_DB_Similarity_Score": np.round(np.random.uniform(0, 1, n), 4),
         "Prompt_Tokens":             np.random.randint(50, 500, n),
         "Response_Tokens":           np.random.randint(20, 300, n),
-        "Context_Response_Overlap_Ratio": np.round(np.random.uniform(0, 1, n), 4),
         "Entity_Match_Score":        np.round(np.random.uniform(0, 1, n), 4),
         "Sentence_Complexity_Index": np.round(np.random.uniform(0, 1, n), 4),
         "Subjectivity_Score":        np.round(np.random.uniform(0, 1, n), 4),
@@ -39,7 +38,6 @@ if not os.path.exists(CSV_PATH):
 
 df = pd.read_csv(CSV_PATH)
 
-# Context_Response_Overlap_Ratio는 모든 코드에서 삭제 (DROP_COLS에 포함)
 DROP_COLS = [
     "index", "Interaction_ID", "User_Prompt", "Provided_Context",
     "LLM_Generated_Response",
@@ -79,12 +77,6 @@ score_cols = [
     "답변 관련성 점수",
     "문맥 충실도 점수",
 ]
-
-score_labels = {
-    "개체 일치 점수":     "개체 일치 점수",
-    "답변 관련성 점수":   "답변 관련성 점수",
-    "문맥 충실도 점수":   "문맥 충실도 점수",
-}
 
 # ──────────────────────────────────────────────
 # 세션 상태 헬퍼
@@ -126,7 +118,7 @@ menu = st.sidebar.radio(
 st.title("LLM의 환각작용")
 
 # ──────────────────────────────────────────────
-# 3. 서론  (문맥-답변 중복 비율 삭제, 데이터 설명에 미포함)
+# 3. 서론
 # ──────────────────────────────────────────────
 if menu == "서론":
     st.title("서론")
@@ -336,7 +328,7 @@ elif menu == "히트맵":
     st.caption(f"■ 데이터베이스 유사도 점수 (Y축, 아래=작은값):  {y_min:.4f}  ~  {y_max:.4f}")
 
 # ──────────────────────────────────────────────
-# 5. 막대그래프  (문맥-답변 중복 비율 삭제, DB 유사도 재추가)
+# 5. 막대그래프  (주관성 점수 구간 분할 오류 수정: 항상 N_BINS개 유지)
 # ──────────────────────────────────────────────
 elif menu == "막대그래프":
     x_options_bar = [
@@ -380,12 +372,21 @@ elif menu == "막대그래프":
     title_x = x_attr
 
     def make_bar_graph(col_x, title_x):
-        edges_full = np.sort(np.unique(np.concatenate([
+        # [수정] 주관성 점수 등에서 분위수 중복으로 Bin 개수가 N_BINS보다 적어지는 문제를 방지:
+        # 분위수 경계값을 만들 때 중복을 허용하지 않고, 중복 발생 시 미세 조정하여 항상 N_BINS개 구간을 유지.
+        qs = np.linspace(0, 1, N_BINS + 1)
+        edges = np.quantile(df[col_x], qs)
+        # 완전히 동일한 경계값이 반복될 경우, 미세 간격으로 벌려서 N_BINS+1개 경계를 확보
+        for i in range(1, len(edges)):
+            if edges[i] <= edges[i - 1]:
+                edges[i] = edges[i - 1] + 1e-9
+        edges_full = np.concatenate([
             [df[col_x].min() - 1e-9],
-            np.quantile(df[col_x], np.linspace(0, 1, N_BINS + 1)),
+            edges,
             [df[col_x].max() + 1e-9],
-        ])))
-        n_actual = len(edges_full) - 1
+        ])
+
+        n_actual = len(edges_full) - 1          # 항상 N_BINS (중복 조정 후)
         labels   = [f"Bin {i+1}" for i in range(n_actual)]
 
         df["_bin"] = pd.cut(
@@ -463,10 +464,7 @@ elif menu == "막대그래프":
                f"비환각: {(df[HALL_COL] == 0).sum()}행)")
 
 # ──────────────────────────────────────────────
-# 6. 히스토그램1  (세 지표 함께 보기 버튼 추가)
-# ──────────────────────────────────────────────
-# ──────────────────────────────────────────────
-# 7. 히스토그램1  (세 지표 함께 보기 버튼 + 결론 수정)
+# 6. 히스토그램1  (세 지표 함께 보기 버튼 포함, 이전 코드 유지)
 # ──────────────────────────────────────────────
 elif menu == "히스토그램1":
     _init_session("hist1_attr_idx", 0)
@@ -553,7 +551,6 @@ elif menu == "히스토그램1":
                    f"분석 속성: {sel_attr}")
 
     else:
-        # ── 세 지표 함께 보기 ──
         sel_group = grp_options[st.session_state["hist1_grp_idx"]]
         grp       = 0 if "0" in sel_group else 1
         grp_label = "그룹 0 (비환각)" if grp == 0 else "그룹 1 (환각)"
